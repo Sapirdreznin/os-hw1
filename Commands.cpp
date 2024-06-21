@@ -78,6 +78,8 @@ void _removeBackgroundSign(char *cmd_line) {
 
 SmallShell::SmallShell() {
 // TODO: add your implementation
+    allowedCommands = {"pwd"};
+
 }
 
 SmallShell::~SmallShell() {
@@ -108,10 +110,62 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     return nullptr;
 }
 
+std::string SmallShell::getCurrentWorkingDirectory() {
+  const size_t bufferSize = 4096;
+  char buffer[bufferSize];
+  return getcwd(buffer, bufferSize);
+}
+
 void SmallShell::executeCommand(const char *cmd_line) {
+    std::cout << cmd_line << std::endl;
+    std::string cmd_line_str = cmd_line;
+    std::vector<std::string> parsed_cmd = this->splitStringBySpace(cmd_line_str);
+    if (!parsed_cmd.empty()) {
+        std::string command = parsed_cmd.front();
+        std::vector<std::string> args(parsed_cmd.begin() + 1, parsed_cmd.end());
+        bool BACKGROUND_FLAG = this->isBackground(cmd_line);
+        
+        if (command == "pwd"){
+            std::cout << this->getCurrentWorkingDirectory() << std::endl;
+        }
+    
+    }
+      
     // TODO: Add your implementation here
     // for example:
     // Command* cmd = CreateCommand(cmd_line);
     // cmd->execute();
     // Please note that you must fork smash process for some commands (e.g., external commands....)
+}
+
+
+
+std::vector<std::string> SmallShell::splitStringBySpace(const std::string& str) {
+    std::vector<std::string> result;
+    std::string word;
+    for (char ch : str) {
+        if (ch == ' ') {
+            if (!word.empty()) {
+                result.push_back(word);
+                word.clear();
+            }
+        } else {
+            word += ch;
+        }
+    }
+    if (!word.empty()) {
+        result.push_back(word);
+    }
+    return result;
+}
+
+bool  SmallShell::isBackground(const char* str) {
+    const char* ptr = str;
+    while (*ptr != '\0') {
+        ++ptr;
+    }
+    if (*(ptr - 1) == '&') {
+      return true;
+    }
+    return false;
 }

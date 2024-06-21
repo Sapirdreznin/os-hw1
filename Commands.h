@@ -2,6 +2,7 @@
 #define SMASH_COMMAND_H_
 
 #include <vector>
+#include <string>    // for std::string
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -204,6 +205,10 @@ class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
+    std::vector<std::string> allowedCommands;
+    std::string getCurrentWorkingDirectory();
+    std::vector<std::string> splitStringBySpace(const std::string& str);
+    bool isBackground(const char* str);
 
 public:
     Command *CreateCommand(const char *cmd_line);
