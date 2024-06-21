@@ -124,6 +124,17 @@ void SmallShell::executeCommand(const char *cmd_line) {
         std::string command = parsed_cmd.front();
         std::vector<std::string> args(parsed_cmd.begin() + 1, parsed_cmd.end());
         bool BACKGROUND_FLAG = this->isBackground(cmd_line);
+        if (BACKGROUND_FLAG){
+            // should be swapped into a function that handles the background running
+            int maxJobId;
+            if (this->jobs.empty()) {
+                maxJobId = 0;
+            }
+            else {
+                maxJobId = this->jobs.rbegin()->first;
+            }
+            jobs[maxJobId + 1] = cmd_line;
+        }
         
         if (command == "pwd"){
             std::cout << this->getCurrentWorkingDirectory() << std::endl;
