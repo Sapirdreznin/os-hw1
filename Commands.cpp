@@ -117,7 +117,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 std::string SmallShell::getCurrentWorkingDirectory() {
   const size_t bufferSize = 4096;
   char buffer[bufferSize];
-  sleep(5);
+  sleep(7);
   return getcwd(buffer, bufferSize);
 }
 
@@ -129,11 +129,11 @@ void SmallShell::removeLastCharIfAmpersand(std::string& str) {
 
 int SmallShell::getMaxJobId() {
     int maxJobId;
-    if (this->jobs.empty()) {
+    if (this->jobsMap.empty()) {
         maxJobId = 0;
     }
     else {
-        maxJobId = this->jobs.rbegin()->first;
+        maxJobId = this->jobsMap.rbegin()->first;
     }
     return maxJobId;
 }
@@ -143,7 +143,19 @@ void SmallShell::updateFinishedJobs(){
     for (const int& value : this->readChannels) {
         int jobId = 0;
         read(value, &jobId, sizeof(jobId));
-        std::cout << jobId << "is the job id";
+        if (jobId != 0){
+            this->jobsMap.erase(jobId);
+            std::cout <<"removed job:" << jobId << std::endl;
+            close(value);
+        }
+    }
+}
+
+
+void SmallShell::_jobs(){
+    this->updateFinishedJobs();
+    for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
+        std::cout <<"[" << it->first << "] " << it->second << std::endl;
     }
 }
 
@@ -158,13 +170,6 @@ void SmallShell::executeCommand(const char *cmd_line) {
         std::string command = parsed_cmd.front();
         std::vector<std::string> args(parsed_cmd.begin() + 1, parsed_cmd.end());
         bool BACKGROUND_FLAG = this->isBackground(cmd_line);
-        
-        if (BACKGROUND_FLAG){
-            
-            // should be swapped into a function that handles the background running
-
-
-        }
         int pipefd[2];
         pipe(pipefd);
         int flags = fcntl(pipefd[READ], F_GETFL, 0);
@@ -177,7 +182,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
             close(pipefd[WRITE]);
             if (BACKGROUND_FLAG){
                 this->readChannels.insert(pipefd[READ]);
-                this->jobs[jobId] = cmd_line;
+                this->jobsMap[jobId] = cmd_line;
             }
             else {
                 close(pipefd[READ]); // no background job so we can close the whole pipe
@@ -188,11 +193,17 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         else {
             close(pipefd[READ]);
-            if (command == "pwd"){
+            if (command == "pwd") {
                 std::cout << this->getCurrentWorkingDirectory() << std::endl;
             }
-            std::string jobIdStr = std::to_string(jobId);
-            write(pipefd[WRITE], jobIdStr.c_str(), jobIdStr.size());
+            else if (command == "jobs") {
+                this->_jobs();
+            }
+            if (BACKGROUND_FLAG) {
+                std::string jobIdStr = std::to_string(jobId);
+                std::cout << jobIdStr.c_str() << std::endl;
+                write(pipefd[WRITE], &jobId, sizeof(jobId));
+            }
             close(pipefd[WRITE]);
             
             exit(0);

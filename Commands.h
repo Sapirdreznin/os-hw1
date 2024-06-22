@@ -209,11 +209,12 @@ private:
     SmallShell();
     std::vector<std::string> allowedCommands;
     std::set<int> readChannels;
-    std::map<int, std::string> jobs;
+    std::map<int, std::string> jobsMap;
 
 
     void removeLastCharIfAmpersand(std::string& str);
     std::string getCurrentWorkingDirectory();
+    void _jobs();
     std::vector<std::string> splitStringBySpace(const std::string& str);
     void updateFinishedJobs();
     bool isBackground(const char* str);
