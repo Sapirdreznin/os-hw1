@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>    // for std::string
 #include <map>
+#include <set>
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
@@ -207,10 +208,16 @@ private:
     // TODO: Add your data members
     SmallShell();
     std::vector<std::string> allowedCommands;
+    std::set<int> readChannels;
     std::map<int, std::string> jobs;
+
+
+    void removeLastCharIfAmpersand(std::string& str);
     std::string getCurrentWorkingDirectory();
     std::vector<std::string> splitStringBySpace(const std::string& str);
+    void updateFinishedJobs();
     bool isBackground(const char* str);
+    int getMaxJobId();
 
 public:
     Command *CreateCommand(const char *cmd_line);

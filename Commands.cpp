@@ -5,11 +5,15 @@
 #include <sstream>
 #include <sys/wait.h>
 #include <iomanip>
+#include <fcntl.h>
 #include "Commands.h"
 
 using namespace std;
 
 const std::string WHITESPACE = " \n\r\t\f\v";
+const int READ = 0;
+const int WRITE = 1;
+
 
 #if 0
 #define FUNC_ENTRY()  \
@@ -113,32 +117,89 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 std::string SmallShell::getCurrentWorkingDirectory() {
   const size_t bufferSize = 4096;
   char buffer[bufferSize];
+  sleep(5);
   return getcwd(buffer, bufferSize);
 }
 
+void SmallShell::removeLastCharIfAmpersand(std::string& str) {
+    if (!str.empty() && str.back() == '&') {
+        str.pop_back();
+    }
+}
+
+int SmallShell::getMaxJobId() {
+    int maxJobId;
+    if (this->jobs.empty()) {
+        maxJobId = 0;
+    }
+    else {
+        maxJobId = this->jobs.rbegin()->first;
+    }
+    return maxJobId;
+}
+
+
+void SmallShell::updateFinishedJobs(){
+    for (const int& value : this->readChannels) {
+        int jobId = 0;
+        read(value, &jobId, sizeof(jobId));
+        std::cout << jobId << "is the job id";
+    }
+}
+
+
 void SmallShell::executeCommand(const char *cmd_line) {
+    this->updateFinishedJobs();
     std::cout << cmd_line << std::endl;
     std::string cmd_line_str = cmd_line;
-    std::vector<std::string> parsed_cmd = this->splitStringBySpace(cmd_line_str);
+    this->removeLastCharIfAmpersand(cmd_line_str);
+    std::vector<std::string> parsed_cmd = this->splitStringBySpace(cmd_line_str); // should parse the & from the last arg
     if (!parsed_cmd.empty()) {
         std::string command = parsed_cmd.front();
         std::vector<std::string> args(parsed_cmd.begin() + 1, parsed_cmd.end());
         bool BACKGROUND_FLAG = this->isBackground(cmd_line);
+        
         if (BACKGROUND_FLAG){
+            
             // should be swapped into a function that handles the background running
-            int maxJobId;
-            if (this->jobs.empty()) {
-                maxJobId = 0;
+
+
+        }
+        int pipefd[2];
+        pipe(pipefd);
+        int flags = fcntl(pipefd[READ], F_GETFL, 0);
+        flags |= O_NONBLOCK;
+        fcntl(pipefd[0], F_SETFL, flags);
+        pid_t pid = fork();
+        const int jobId = this->getMaxJobId() + 1;
+
+        if (pid != 0) { // if father
+            close(pipefd[WRITE]);
+            if (BACKGROUND_FLAG){
+                this->readChannels.insert(pipefd[READ]);
+                this->jobs[jobId] = cmd_line;
             }
             else {
-                maxJobId = this->jobs.rbegin()->first;
+                close(pipefd[READ]); // no background job so we can close the whole pipe
+                int status;
+                waitpid(pid, &status, 0);
             }
-            jobs[maxJobId + 1] = cmd_line;
+            
+        }
+        else {
+            close(pipefd[READ]);
+            if (command == "pwd"){
+                std::cout << this->getCurrentWorkingDirectory() << std::endl;
+            }
+            std::string jobIdStr = std::to_string(jobId);
+            write(pipefd[WRITE], jobIdStr.c_str(), jobIdStr.size());
+            close(pipefd[WRITE]);
+            
+            exit(0);
+
         }
         
-        if (command == "pwd"){
-            std::cout << this->getCurrentWorkingDirectory() << std::endl;
-        }
+
     
     }
       
