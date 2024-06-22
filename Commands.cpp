@@ -80,6 +80,26 @@ void _removeBackgroundSign(char *cmd_line) {
 
 // TODO: Add your implementation for classes in Commands.h 
 
+Job::Job(int _pid, int _jobId, std::string& _command){
+    this->pid = _pid;
+    this->jobId = _jobId;
+    this->command = _command;
+}
+
+int Job::get_pid() {
+    return this->pid;
+}
+int Job::get_job_id() {
+    return this->jobId;
+}
+
+std::string Job::get_command() {
+    return this->command;
+}
+
+
+
+
 SmallShell::SmallShell() {
 // TODO: add your implementation
     allowedCommands = {"pwd"};
@@ -152,11 +172,51 @@ void SmallShell::updateFinishedJobs(){
 }
 
 
-void SmallShell::_jobs(){
+void SmallShell::_jobs() {
     this->updateFinishedJobs();
     for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
-        std::cout <<"[" << it->first << "] " << it->second << std::endl;
+        std::cout <<"[" << it->first << "] " << it->second.get_command() << std::endl;
     }
+}
+
+void SmallShell::_quit(std::vector<std::string>& args) {
+    if (!args.empty() && args[0] == "kill") {
+        for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
+            int pid = it->second.get_pid();
+            kill(pid, 9);
+        }   
+    }
+    exit(0);
+}
+
+void SmallShell::_kill(std::vector<std::string>& args){
+    if (args.size() != 2) {
+        // error
+    }
+    if (args[0][0] != '-') {
+        // error
+    }
+    else {
+        args[0].erase(args[0].begin());  // Erase the first character
+    }
+
+    int jobId;
+    int sigNum;
+    try {
+        sigNum = std::stoi(args[0]); // Convert string to int
+        jobId = std::stoi(args[1]); // Convert string to int
+
+    } catch (const std::exception& e) {
+        std::cerr << "Conversion error: " << e.what() << std::endl;
+        // error
+    }
+
+    if (this->jobsMap.count(jobId) == 0) {
+        // error
+    }
+
+    kill(this->jobsMap[jobId].get_pid(), sigNum);
+
 }
 
 
@@ -169,6 +229,10 @@ void SmallShell::executeCommand(const char *cmd_line) {
     if (!parsed_cmd.empty()) {
         std::string command = parsed_cmd.front();
         std::vector<std::string> args(parsed_cmd.begin() + 1, parsed_cmd.end());
+
+        if (command == "quit") {
+            this->_quit(args);
+        }
         bool BACKGROUND_FLAG = this->isBackground(cmd_line);
         int pipefd[2];
         pipe(pipefd);
@@ -181,8 +245,10 @@ void SmallShell::executeCommand(const char *cmd_line) {
         if (pid != 0) { // if father
             close(pipefd[WRITE]);
             if (BACKGROUND_FLAG){
+                Job job(pid, jobId, cmd_line_str);
                 this->readChannels.insert(pipefd[READ]);
-                this->jobsMap[jobId] = cmd_line;
+                // this->jobsMap[jobId] = cmd_line_str;
+                this->jobsMap.emplace(jobId, Job(pid, jobId, cmd_line_str));
             }
             else {
                 close(pipefd[READ]); // no background job so we can close the whole pipe
@@ -199,9 +265,12 @@ void SmallShell::executeCommand(const char *cmd_line) {
             else if (command == "jobs") {
                 this->_jobs();
             }
+
+            else if (command == "kill") {
+                this->_kill(args);
+            }
+            
             if (BACKGROUND_FLAG) {
-                std::string jobIdStr = std::to_string(jobId);
-                std::cout << jobIdStr.c_str() << std::endl;
                 write(pipefd[WRITE], &jobId, sizeof(jobId));
             }
             close(pipefd[WRITE]);
@@ -213,7 +282,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
 
     
     }
-      
+
     // TODO: Add your implementation here
     // for example:
     // Command* cmd = CreateCommand(cmd_line);

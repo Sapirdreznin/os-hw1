@@ -202,6 +202,17 @@ public:
     void execute() override;
 };
 
+class Job {
+private:
+    int pid;
+    int jobId;
+    std::string command;
+public:
+    Job(int _pid, int _jobId, std::string& _command);
+    int get_pid();
+    int get_job_id();
+    std::string get_command();
+};
 
 class SmallShell {
 private:
@@ -209,12 +220,17 @@ private:
     SmallShell();
     std::vector<std::string> allowedCommands;
     std::set<int> readChannels;
-    std::map<int, std::string> jobsMap;
+    // std::map<int, std::string> jobsMap;
+    std::map<int, Job> jobsMap;
+
 
 
     void removeLastCharIfAmpersand(std::string& str);
     std::string getCurrentWorkingDirectory();
     void _jobs();
+    void _quit(std::vector<std::string>& args);
+    void _kill(std::vector<std::string>& args);
+
     std::vector<std::string> splitStringBySpace(const std::string& str);
     void updateFinishedJobs();
     bool isBackground(const char* str);
