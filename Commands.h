@@ -218,10 +218,12 @@ class SmallShell {
 private:
     // TODO: Add your data members
     SmallShell();
-    std::vector<std::string> allowedCommands;
+    std::set<std::string> internalCommands;
+    std::set<std::string> externalCommands;
     std::set<int> readChannels;
     // std::map<int, std::string> jobsMap;
-    std::map<int, Job> jobsMap;
+    std::map<int, Job*> jobsMap;
+    std::map<std::string, std::string> aliasMap;
 
 
 
@@ -230,6 +232,12 @@ private:
     void _jobs();
     void _quit(std::vector<std::string>& args);
     void _kill(std::vector<std::string>& args);
+    void _alias(std::vector<std::string>& args);
+    std::vector<char*> parseStringCommand(const std::string& command);
+
+    bool isComplexCommand(std::string& command);
+    void runSimpleExternal(std::string& command);
+    void runComplexCommand(std::string& command);
 
     std::vector<std::string> splitStringBySpace(const std::string& str);
     void updateFinishedJobs();

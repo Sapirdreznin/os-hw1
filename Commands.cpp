@@ -3,6 +3,7 @@
 #include <iostream>
 #include <vector>
 #include <sstream>
+#include <cstring>
 #include <sys/wait.h>
 #include <iomanip>
 #include <fcntl.h>
@@ -102,7 +103,9 @@ std::string Job::get_command() {
 
 SmallShell::SmallShell() {
 // TODO: add your implementation
-    allowedCommands = {"pwd"};
+    internalCommands = {"chprompt", "showpid", "pwd", "cd", "jobs", "fg", "quit", "kill",
+        "alias", "unalias"};
+    externalCommands = {};
 
 }
 
@@ -137,7 +140,6 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 std::string SmallShell::getCurrentWorkingDirectory() {
   const size_t bufferSize = 4096;
   char buffer[bufferSize];
-  sleep(7);
   return getcwd(buffer, bufferSize);
 }
 
@@ -158,31 +160,54 @@ int SmallShell::getMaxJobId() {
     return maxJobId;
 }
 
+bool is_pid_running(pid_t pid) {
+
+    while(waitpid(-1, 0, WNOHANG) > 0) {
+        // Wait for defunct....
+    }
+
+    if (0 == kill(pid, 0))
+        return true; // Process exists
+
+    return false;
+}
 
 void SmallShell::updateFinishedJobs(){
-    for (const int& value : this->readChannels) {
-        int jobId = 0;
-        read(value, &jobId, sizeof(jobId));
-        if (jobId != 0){
-            this->jobsMap.erase(jobId);
-            std::cout <<"removed job:" << jobId << std::endl;
-            close(value);
+    // for (const int& value : this->readChannels) {
+    //     int jobId = 0;
+    //     read(value, &jobId, sizeof(jobId));
+    //     if (jobId != 0){
+    //         this->jobsMap.erase(jobId);
+    //         std::cout <<"removed job:" << jobId << std::endl;
+    //         close(value);
+    //     }
+    // }
+
+    for (auto it = this->jobsMap.begin(); it != this->jobsMap.end();) {
+        if (!is_pid_running(it->second->get_pid())) {
+            // Process does not exist anymore
+            delete it->second;
+            it = this->jobsMap.erase(it);
+        }
+        else {
+            ++it;
         }
     }
 }
 
 
+
 void SmallShell::_jobs() {
     this->updateFinishedJobs();
     for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
-        std::cout <<"[" << it->first << "] " << it->second.get_command() << std::endl;
+        std::cout <<"[" << it->first << "] " << it->second->get_command() << std::endl;
     }
 }
 
 void SmallShell::_quit(std::vector<std::string>& args) {
     if (!args.empty() && args[0] == "kill") {
         for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
-            int pid = it->second.get_pid();
+            int pid = it->second->get_pid();
             kill(pid, 9);
         }   
     }
@@ -215,9 +240,80 @@ void SmallShell::_kill(std::vector<std::string>& args){
         // error
     }
 
-    kill(this->jobsMap[jobId].get_pid(), sigNum);
+    // kill(this->jobsMap[jobId].get_pid(), sigNum);
 
 }
+
+void SmallShell::_alias(std::vector<std::string> &args) {
+    if (args.empty()) {
+        for (auto & it : this->aliasMap) {
+            std::cout << it.second << std::endl;
+        }
+    }
+    // else if (args.size() != 1) {
+    //     // some error
+    // }
+
+    // alias fwefwe=quit kill frefr frefref frfe
+    else {
+        // If "=" is found in the string
+        std::string alias, command;
+        size_t pos = args[0].find('=');
+        if (pos != std::string::npos) {
+            alias = args[0].substr(0, pos);
+            command = args[0].substr(pos + 1);
+            if (this->aliasMap.find(alias) != this->aliasMap.end()) {
+                // eror that this alias exists
+            }
+            else {
+                for (int i=1; i < args.size(); i++) {
+                    command += " " + args[i];
+                }
+                this->aliasMap[alias] = command;
+            }
+        } else {
+            std::cout << "The input string does not contain an '=' character." << std::endl;
+
+            return; // Exit with error code
+        }
+    }
+}
+
+
+std::vector<char*> SmallShell::parseStringCommand(const std::string& command) {
+    std::vector<char*> args;
+    char* cmd = strdup(command.c_str());  // Duplicate the command string for tokenization
+    char* token = std::strtok(cmd, " ");  // Split string by spaces
+
+    while (token != nullptr) {
+        args.push_back(token);
+        token = std::strtok(nullptr, " ");
+    }
+    args.push_back(nullptr);  // execvp requires a nullptr at the end
+
+    return args;
+}
+
+bool SmallShell::isComplexCommand(std::string &command) {
+    return command.find('*') != std::string::npos || command.find('?') != std::string::npos;
+}
+
+void SmallShell::runSimpleExternal(std::string &command) {
+
+    std::vector<char*> args = this->parseStringCommand(command);
+    // Arguments for the program (first argument is the program name)
+    const char* program = args[0];
+
+    execvp(program, args.data());
+}
+
+void SmallShell::runComplexCommand(std::string &command) {
+    char* commandChar = strdup(command.c_str());
+    char *bash = (char *)"/bin/bash";
+    char *bashFlag = (char *)"-c";
+    char *argv[] = {bash, bashFlag, commandChar, nullptr};
+    execvp(bash, argv);}
+
 
 
 void SmallShell::executeCommand(const char *cmd_line) {
@@ -233,6 +329,9 @@ void SmallShell::executeCommand(const char *cmd_line) {
         if (command == "quit") {
             this->_quit(args);
         }
+        else if (command == "alias") {
+            this->_alias(args);
+        }
         bool BACKGROUND_FLAG = this->isBackground(cmd_line);
         int pipefd[2];
         pipe(pipefd);
@@ -245,10 +344,11 @@ void SmallShell::executeCommand(const char *cmd_line) {
         if (pid != 0) { // if father
             close(pipefd[WRITE]);
             if (BACKGROUND_FLAG){
-                Job job(pid, jobId, cmd_line_str);
+                // Job job(pid, jobId, cmd_line_str);
+                Job* job = new Job(pid, jobId, cmd_line_str);
                 this->readChannels.insert(pipefd[READ]);
-                // this->jobsMap[jobId] = cmd_line_str;
-                this->jobsMap.emplace(jobId, Job(pid, jobId, cmd_line_str));
+                this->jobsMap[jobId] = job;
+                // this->jobsMap.emplace(jobId, Job(pid, jobId, cmd_line_str));
             }
             else {
                 close(pipefd[READ]); // no background job so we can close the whole pipe
@@ -269,7 +369,25 @@ void SmallShell::executeCommand(const char *cmd_line) {
             else if (command == "kill") {
                 this->_kill(args);
             }
-            
+            else if (this->aliasMap.find(command) != this->aliasMap.end()) {
+                std::string aliasCommand = this->aliasMap[command];
+                for (const std::string & arg : args) {
+                    aliasCommand += arg;
+                }
+                char* commandChar = new char[aliasCommand.size() + 1];
+                strcpy(commandChar, aliasCommand.c_str());
+                this->executeCommand(commandChar);
+                delete[] commandChar;
+            }
+
+            if (this->isComplexCommand(cmd_line_str)) {
+                this->runComplexCommand(cmd_line_str);
+            }
+            else {
+                this->runSimpleExternal(cmd_line_str);
+
+            }
+
             if (BACKGROUND_FLAG) {
                 write(pipefd[WRITE], &jobId, sizeof(jobId));
             }
