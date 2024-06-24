@@ -226,14 +226,13 @@ private:
     std::map<std::string, std::string> aliasMap;
 
 
-
+    std::vector<std::string> splitString(const std::string& str);
     void removeLastCharIfAmpersand(std::string& str);
     std::string getCurrentWorkingDirectory();
     void _jobs();
     void _quit(std::vector<std::string>& args);
     void _kill(std::vector<std::string>& args);
     void _alias(std::vector<std::string>& args);
-    std::vector<char*> parseStringCommand(const std::string& command);
 
     bool isComplexCommand(std::string& command);
     void runSimpleExternal(std::string& command);

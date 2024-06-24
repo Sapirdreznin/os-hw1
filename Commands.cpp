@@ -6,6 +6,7 @@
 #include <cstring>
 #include <sys/wait.h>
 #include <iomanip>
+#include <regex>
 #include <fcntl.h>
 #include "Commands.h"
 
@@ -280,19 +281,19 @@ void SmallShell::_alias(std::vector<std::string> &args) {
 }
 
 
-std::vector<char*> SmallShell::parseStringCommand(const std::string& command) {
-    std::vector<char*> args;
-    char* cmd = strdup(command.c_str());  // Duplicate the command string for tokenization
-    char* token = std::strtok(cmd, " ");  // Split string by spaces
-
-    while (token != nullptr) {
-        args.push_back(token);
-        token = std::strtok(nullptr, " ");
-    }
-    args.push_back(nullptr);  // execvp requires a nullptr at the end
-
-    return args;
-}
+// std::vector<char*> SmallShell::parseStringCommand(const std::string& command) {
+//     std::vector<char*> args;
+//     char* cmd = strdup(command.c_str());  // Duplicate the command string for tokenization
+//     char* token = std::strtok(cmd, " ");  // Split string by spaces
+//
+//     while (token != nullptr) {
+//         args.push_back(token);
+//         token = std::strtok(nullptr, " ");
+//     }
+//     args.push_back(nullptr);  // execvp requires a nullptr at the end
+//
+//     return args;
+// }
 
 bool SmallShell::isComplexCommand(std::string &command) {
     return command.find('*') != std::string::npos || command.find('?') != std::string::npos;
@@ -300,11 +301,18 @@ bool SmallShell::isComplexCommand(std::string &command) {
 
 void SmallShell::runSimpleExternal(std::string &command) {
 
-    std::vector<char*> args = this->parseStringCommand(command);
-    // Arguments for the program (first argument is the program name)
-    const char* program = args[0];
+    std::vector<string> args = this->splitStringBySpace(command);
+    std::vector<char* const> argsChar;
+    for (const std::string & arg : args) {
+        const char* cstr = arg.c_str();
+        size_t len = std::strlen(cstr);
+        char* charPtr = new char[len + 1];
+        std::strcpy(charPtr, cstr);
+        argsChar.push_back(charPtr);
 
-    execvp(program, args.data());
+    }
+    const char* program = argsChar[0];
+    execvp(program, argsChar.data());
 }
 
 void SmallShell::runComplexCommand(std::string &command) {
@@ -332,7 +340,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
         else if (command == "alias") {
             this->_alias(args);
         }
-        bool BACKGROUND_FLAG = this->isBackground(cmd_line);
+        bool BACKGROUND_FLAG = _isBackgroundComamnd(cmd_line);
         int pipefd[2];
         pipe(pipefd);
         int flags = fcntl(pipefd[READ], F_GETFL, 0);
@@ -411,22 +419,31 @@ void SmallShell::executeCommand(const char *cmd_line) {
 
 
 std::vector<std::string> SmallShell::splitStringBySpace(const std::string& str) {
-    std::vector<std::string> result;
-    std::string word;
-    for (char ch : str) {
-        if (ch == ' ') {
-            if (!word.empty()) {
-                result.push_back(word);
-                word.clear();
-            }
-        } else {
-            word += ch;
-        }
-    }
-    if (!word.empty()) {
-        result.push_back(word);
-    }
-    return result;
+    // std::vector<std::string> result;
+    // std::string word;
+    // for (char ch : str) {
+    //     if (ch == ' ') {
+    //         if (!word.empty()) {
+    //             result.push_back(word);
+    //             word.clear();
+    //         }
+    //     } else {
+    //         word += ch;
+    //     }
+    // }
+    // if (!word.empty()) {
+    //     result.push_back(word);
+    // }
+    // return result;
+    // Regular expression to split by any whitespace characters
+    std::regex ws_re("[\\s]+"); // \s matches any whitespace character
+
+    // Splitting the string using regex_token_iterator
+    std::vector<std::string> results(
+        std::sregex_token_iterator(str.begin(), str.end(), ws_re, -1),
+        std::sregex_token_iterator()
+    );
+    return results;
 }
 
 bool  SmallShell::isBackground(const char* str) {
