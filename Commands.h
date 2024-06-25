@@ -219,7 +219,7 @@ private:
     // TODO: Add your data members
     SmallShell();
     std::set<std::string> internalCommands;
-    std::set<std::string> externalCommands;
+    std::set<std::string> specialCommands;
     std::set<int> readChannels;
     // std::map<int, std::string> jobsMap;
     std::map<int, Job*> jobsMap;
@@ -228,19 +228,24 @@ private:
 
     std::vector<std::string> splitString(const std::string& str);
     void removeLastCharIfAmpersand(std::string& str);
-    std::string getCurrentWorkingDirectory();
+    void _pwd();
     void _jobs();
     void _quit(std::vector<std::string>& args);
     void _kill(std::vector<std::string>& args);
     void _alias(std::vector<std::string>& args);
+    void _getuser(std::vector<std::string>& args);
+
 
     bool isComplexCommand(std::string& command);
     void runSimpleExternal(std::string& command);
     void runComplexCommand(std::string& command);
 
+    int replace_stdout_with_file(int fd);
+    std::pair<int, int> handle_redirection(std::vector<std::string>& args, bool redirection_flag, bool double_redirection_flag);
+
+
     std::vector<std::string> splitStringBySpace(const std::string& str);
     void updateFinishedJobs();
-    bool isBackground(const char* str);
     int getMaxJobId();
 
 public:

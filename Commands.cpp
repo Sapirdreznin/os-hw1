@@ -106,7 +106,7 @@ SmallShell::SmallShell() {
 // TODO: add your implementation
     internalCommands = {"chprompt", "showpid", "pwd", "cd", "jobs", "fg", "quit", "kill",
         "alias", "unalias"};
-    externalCommands = {};
+    specialCommands = {};
 
 }
 
@@ -138,10 +138,16 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
     return nullptr;
 }
 
-std::string SmallShell::getCurrentWorkingDirectory() {
-  const size_t bufferSize = 4096;
-  char buffer[bufferSize];
-  return getcwd(buffer, bufferSize);
+void SmallShell::_pwd() {
+    const size_t bufferSize = 1024;
+    char buffer[bufferSize];
+
+    if (getcwd(buffer, sizeof(buffer)) != NULL) {
+        std::cout << buffer << std::endl;
+    }
+    else {
+        perror("smash error: getcwd failed");
+    }
 }
 
 void SmallShell::removeLastCharIfAmpersand(std::string& str) {
@@ -207,9 +213,11 @@ void SmallShell::_jobs() {
 
 void SmallShell::_quit(std::vector<std::string>& args) {
     if (!args.empty() && args[0] == "kill") {
+        std::cout << "sending SIGKILL signal to "<< this->jobsMap.size() <<  " jobs:" << std::endl;
         for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
             int pid = it->second->get_pid();
             kill(pid, 9);
+            std::cout << pid << ": " << it->second->get_command() << std::endl;
         }   
     }
     exit(0);
@@ -235,13 +243,14 @@ void SmallShell::_kill(std::vector<std::string>& args){
     } catch (const std::exception& e) {
         std::cerr << "Conversion error: " << e.what() << std::endl;
         // error
+        return;
     }
 
     if (this->jobsMap.count(jobId) == 0) {
         // error
     }
 
-    // kill(this->jobsMap[jobId].get_pid(), sigNum);
+    kill(this->jobsMap[jobId]->get_pid(), sigNum);
 
 }
 
@@ -263,8 +272,14 @@ void SmallShell::_alias(std::vector<std::string> &args) {
         if (pos != std::string::npos) {
             alias = args[0].substr(0, pos);
             command = args[0].substr(pos + 1);
-            if (this->aliasMap.find(alias) != this->aliasMap.end()) {
+            std::regex pattern("^[a-zA-Z0-9_]*$");
+            if (this->aliasMap.find(alias) != this->aliasMap.end() ||
+                this->internalCommands.count(alias) > 0 || this->specialCommands.count(alias) > 0) {
                 // eror that this alias exists
+                std::cerr << "smash error: alias: " << alias << " already exists or is a reserved command" << std::endl;
+            }
+            else if (!std::regex_match(alias, pattern)) {
+                std::cerr << "smash error: alias: invalid alias format" << std::endl;
             }
             else {
                 for (int i=1; i < args.size(); i++) {
@@ -280,21 +295,6 @@ void SmallShell::_alias(std::vector<std::string> &args) {
     }
 }
 
-
-// std::vector<char*> SmallShell::parseStringCommand(const std::string& command) {
-//     std::vector<char*> args;
-//     char* cmd = strdup(command.c_str());  // Duplicate the command string for tokenization
-//     char* token = std::strtok(cmd, " ");  // Split string by spaces
-//
-//     while (token != nullptr) {
-//         args.push_back(token);
-//         token = std::strtok(nullptr, " ");
-//     }
-//     args.push_back(nullptr);  // execvp requires a nullptr at the end
-//
-//     return args;
-// }
-
 bool SmallShell::isComplexCommand(std::string &command) {
     return command.find('*') != std::string::npos || command.find('?') != std::string::npos;
 }
@@ -302,7 +302,7 @@ bool SmallShell::isComplexCommand(std::string &command) {
 void SmallShell::runSimpleExternal(std::string &command) {
 
     std::vector<string> args = this->splitStringBySpace(command);
-    std::vector<char* const> argsChar;
+    std::vector<char*> argsChar;
     for (const std::string & arg : args) {
         const char* cstr = arg.c_str();
         size_t len = std::strlen(cstr);
@@ -312,7 +312,10 @@ void SmallShell::runSimpleExternal(std::string &command) {
 
     }
     const char* program = argsChar[0];
-    execvp(program, argsChar.data());
+
+    if (execvp(program, argsChar.data()) == -1) {
+        perror("smash error: execvp failed");
+    }
 }
 
 void SmallShell::runComplexCommand(std::string &command) {
@@ -320,93 +323,115 @@ void SmallShell::runComplexCommand(std::string &command) {
     char *bash = (char *)"/bin/bash";
     char *bashFlag = (char *)"-c";
     char *argv[] = {bash, bashFlag, commandChar, nullptr};
-    execvp(bash, argv);}
+    if (execvp(bash, argv) == -1) {
+        perror("smash error: execvp failed");
+    }
+}
+
+
+int SmallShell::replace_stdout_with_file(int fd) {
+    int saved_stdout = dup(1); // Save current stdout
+    // Replace stdout with your file descriptor
+    dup2(fd, 1);
+    return saved_stdout;
+}
+
+std::pair<int, int> SmallShell::handle_redirection(std::vector<std::string> &args, bool redirection_flag, bool double_redirection_flag) {
+    int append_flag = O_TRUNC;
+    if (double_redirection_flag) {
+        append_flag = O_APPEND;
+    }
+    std::string& path = args[args.size() - 1];
+    int file_fd = open(path.c_str(), O_WRONLY | O_CREAT | append_flag, 0644);
+    args.pop_back();
+    args.pop_back();
+    int stdOut = this->replace_stdout_with_file(file_fd);
+    return std::make_pair(file_fd, stdOut);
+}
 
 
 
 void SmallShell::executeCommand(const char *cmd_line) {
     this->updateFinishedJobs();
-    std::cout << cmd_line << std::endl;
     std::string cmd_line_str = cmd_line;
     this->removeLastCharIfAmpersand(cmd_line_str);
     std::vector<std::string> parsed_cmd = this->splitStringBySpace(cmd_line_str); // should parse the & from the last arg
     if (!parsed_cmd.empty()) {
         std::string command = parsed_cmd.front();
         std::vector<std::string> args(parsed_cmd.begin() + 1, parsed_cmd.end());
+        bool REDIRECTION_FLAG = std::find(args.begin(), args.end(), "<") != args.end();
+        bool DOUBLE_REDIRECTION_FLAG = std::find(args.begin(), args.end(), "<<") != args.end();
+        int stdOut = 0;
+        int file_fd = 0;
+        if (DOUBLE_REDIRECTION_FLAG || REDIRECTION_FLAG) {
+            auto res = this->handle_redirection(args, REDIRECTION_FLAG, DOUBLE_REDIRECTION_FLAG);
+            file_fd = res.first;
+            stdOut = res.second;
 
-        if (command == "quit") {
+        }
+
+
+        if (command == "pwd") {
+            this->_pwd();
+        }
+        else if (command == "jobs") {
+            this->_jobs();
+        }
+
+        else if (command == "quit") {
             this->_quit(args);
+        }
+        else if (command == "kill") {
+            this->_kill(args);
         }
         else if (command == "alias") {
             this->_alias(args);
         }
-        bool BACKGROUND_FLAG = _isBackgroundComamnd(cmd_line);
-        int pipefd[2];
-        pipe(pipefd);
-        int flags = fcntl(pipefd[READ], F_GETFL, 0);
-        flags |= O_NONBLOCK;
-        fcntl(pipefd[0], F_SETFL, flags);
-        pid_t pid = fork();
-        const int jobId = this->getMaxJobId() + 1;
 
+        else if (this->aliasMap.find(command) != this->aliasMap.end()) {
+            std::string aliasCommand = this->aliasMap[command];
+            for (const std::string & arg : args) {
+                aliasCommand += arg;
+            }
+            char* commandChar = new char[aliasCommand.size() + 1];
+            strcpy(commandChar, aliasCommand.c_str());
+            this->executeCommand(commandChar);
+            delete[] commandChar;
+        }
+        bool BACKGROUND_FLAG = (_isBackgroundComamnd(cmd_line)) &&
+            (this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0);
+        pid_t pid = fork();
+        if (pid < 0) {
+            perror("smash error: fork failed");
+        }
+        const int jobId = this->getMaxJobId() + 1;
         if (pid != 0) { // if father
-            close(pipefd[WRITE]);
             if (BACKGROUND_FLAG){
-                // Job job(pid, jobId, cmd_line_str);
                 Job* job = new Job(pid, jobId, cmd_line_str);
-                this->readChannels.insert(pipefd[READ]);
                 this->jobsMap[jobId] = job;
-                // this->jobsMap.emplace(jobId, Job(pid, jobId, cmd_line_str));
             }
             else {
-                close(pipefd[READ]); // no background job so we can close the whole pipe
                 int status;
                 waitpid(pid, &status, 0);
             }
-            
+            if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
+                dup2(stdOut, 1);
+                close(file_fd);
+            }
         }
         else {
-            close(pipefd[READ]);
-            if (command == "pwd") {
-                std::cout << this->getCurrentWorkingDirectory() << std::endl;
-            }
-            else if (command == "jobs") {
-                this->_jobs();
-            }
-
-            else if (command == "kill") {
-                this->_kill(args);
-            }
-            else if (this->aliasMap.find(command) != this->aliasMap.end()) {
-                std::string aliasCommand = this->aliasMap[command];
-                for (const std::string & arg : args) {
-                    aliasCommand += arg;
+            auto it = this->internalCommands.find(command);
+            if (it == this->internalCommands.end()) {
+                if (this->isComplexCommand(cmd_line_str)) {
+                    this->runComplexCommand(cmd_line_str);
                 }
-                char* commandChar = new char[aliasCommand.size() + 1];
-                strcpy(commandChar, aliasCommand.c_str());
-                this->executeCommand(commandChar);
-                delete[] commandChar;
-            }
+                else {
+                    this->runSimpleExternal(cmd_line_str);
 
-            if (this->isComplexCommand(cmd_line_str)) {
-                this->runComplexCommand(cmd_line_str);
+                }
             }
-            else {
-                this->runSimpleExternal(cmd_line_str);
-
-            }
-
-            if (BACKGROUND_FLAG) {
-                write(pipefd[WRITE], &jobId, sizeof(jobId));
-            }
-            close(pipefd[WRITE]);
-            
             exit(0);
-
         }
-        
-
-    
     }
 
     // TODO: Add your implementation here
@@ -419,22 +444,6 @@ void SmallShell::executeCommand(const char *cmd_line) {
 
 
 std::vector<std::string> SmallShell::splitStringBySpace(const std::string& str) {
-    // std::vector<std::string> result;
-    // std::string word;
-    // for (char ch : str) {
-    //     if (ch == ' ') {
-    //         if (!word.empty()) {
-    //             result.push_back(word);
-    //             word.clear();
-    //         }
-    //     } else {
-    //         word += ch;
-    //     }
-    // }
-    // if (!word.empty()) {
-    //     result.push_back(word);
-    // }
-    // return result;
     // Regular expression to split by any whitespace characters
     std::regex ws_re("[\\s]+"); // \s matches any whitespace character
 
@@ -444,15 +453,4 @@ std::vector<std::string> SmallShell::splitStringBySpace(const std::string& str) 
         std::sregex_token_iterator()
     );
     return results;
-}
-
-bool  SmallShell::isBackground(const char* str) {
-    const char* ptr = str;
-    while (*ptr != '\0') {
-        ++ptr;
-    }
-    if (*(ptr - 1) == '&') {
-      return true;
-    }
-    return false;
 }
