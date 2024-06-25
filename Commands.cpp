@@ -290,10 +290,26 @@ void SmallShell::_alias(std::vector<std::string> &args) {
         } else {
             std::cout << "The input string does not contain an '=' character." << std::endl;
 
-            return; // Exit with error code
         }
     }
 }
+
+void SmallShell::_unalias(std::vector<std::string> &args) {
+
+    if (args.size() == 0) {
+        std::cerr << "smash error: unalias: not enough arguments" << std::endl;
+    }
+    for (const std::string & arg : args) {
+        if (this->aliasMap.count(arg) > 0) {
+            this->aliasMap.erase(arg);
+        }
+        else {
+            std::cerr << "smash error: unalias: " << arg << " alias does not exist" << std::endl;
+            return;
+        }
+    }
+}
+
 
 bool SmallShell::isComplexCommand(std::string &command) {
     return command.find('*') != std::string::npos || command.find('?') != std::string::npos;
@@ -343,6 +359,9 @@ std::pair<int, int> SmallShell::handle_redirection(std::vector<std::string> &arg
     }
     std::string& path = args[args.size() - 1];
     int file_fd = open(path.c_str(), O_WRONLY | O_CREAT | append_flag, 0644);
+    if (file_fd == -1) {
+        perror("smash error: open failed");
+    }
     args.pop_back();
     args.pop_back();
     int stdOut = this->replace_stdout_with_file(file_fd);
@@ -387,11 +406,14 @@ void SmallShell::executeCommand(const char *cmd_line) {
         else if (command == "alias") {
             this->_alias(args);
         }
+        else if (command == "unalias") {
+            this->_unalias(args);
+        }
 
         else if (this->aliasMap.find(command) != this->aliasMap.end()) {
             std::string aliasCommand = this->aliasMap[command];
             for (const std::string & arg : args) {
-                aliasCommand += arg;
+                aliasCommand += " " + arg;
             }
             char* commandChar = new char[aliasCommand.size() + 1];
             strcpy(commandChar, aliasCommand.c_str());
@@ -416,7 +438,10 @@ void SmallShell::executeCommand(const char *cmd_line) {
             }
             if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
                 dup2(stdOut, 1);
-                close(file_fd);
+                int close_res = close(file_fd);
+                if (close_res == -1) {
+                    perror("smash error: close failed");
+                }
             }
         }
         else {

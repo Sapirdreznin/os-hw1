@@ -233,6 +233,7 @@ private:
     void _quit(std::vector<std::string>& args);
     void _kill(std::vector<std::string>& args);
     void _alias(std::vector<std::string>& args);
+    void _unalias(std::vector<std::string>& args);
     void _getuser(std::vector<std::string>& args);
 
 
