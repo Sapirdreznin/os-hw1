@@ -100,6 +100,10 @@ std::string Job::get_command() {
 }
 
 
+Command::Command(std::string& real_command, std::string& parsed_command) {
+    this->_real_command = real_command;
+    this->_parsed_command = parsed_command;
+}
 
 
 SmallShell::SmallShell() {
@@ -313,10 +317,10 @@ void SmallShell::_kill(std::vector<std::string>& args){
 
 }
 
-void SmallShell::_alias(std::vector<std::string> &args) {
+void SmallShell::_alias(std::vector<std::string> &args, std::string& real_command) {
     if (args.empty()) {
         for (auto & it : this->aliasMap) {
-            std::cout << it.second << std::endl;
+            std::cout << it.second->_real_command << std::endl;
         }
     }
     // else if (args.size() != 1) {
@@ -341,13 +345,22 @@ void SmallShell::_alias(std::vector<std::string> &args) {
                 std::cerr << "smash error: alias: invalid alias format" << std::endl;
             }
             else {
-                for (int i=1; i < args.size(); i++) {
-                    command += " " + args[i];
+                if ((command[0] == '\'') && (args.back().back() == '\'')) {
+                    for (int i=1; i < args.size(); i++) {
+                        command += " " + args[i];
+                    }
+                    command = command.substr(1, command.length() - 2);
+                    Command* command_obj = new Command(real_command, command);
+                    this->aliasMap[alias] = command_obj;
                 }
-                this->aliasMap[alias] = command;
+                else {
+                    std::cerr << "smash error: alias: invalid alias format" << std::endl;
+
+                }
+
             }
         } else {
-            std::cout << "The input string does not contain an '=' character." << std::endl;
+            std::cerr << "smash error: alias: invalid alias format" << std::endl;
 
         }
     }
@@ -361,6 +374,7 @@ void SmallShell::_unalias(std::vector<std::string> &args) {
     for (const std::string & arg : args) {
         if (this->aliasMap.count(arg) > 0) {
             this->aliasMap.erase(arg);
+            // todo: call delete functiom to avoid memory leaks
         }
         else {
             std::cerr << "smash error: unalias: " << arg << " alias does not exist" << std::endl;
@@ -406,8 +420,12 @@ void SmallShell::runSimpleExternal(std::string &command) {
         argsChar.push_back(charPtr);
 
     }
-    const char* program = argsChar[0];
+    // for (auto & arg : argsChar) {
+    //     std::cout << arg << std::endl;
+    // }
 
+    // std::cout << program << std::endl << argsChar.data() << std::endl;
+    const char* program = argsChar[0];
     if (execvp(program, argsChar.data()) == -1) {
         perror("smash error: execvp failed");
     }
@@ -491,14 +509,14 @@ void SmallShell::executeCommand(const char *cmd_line) {
             this->_kill(args);
         }
         else if (command == "alias") {
-            this->_alias(args);
+            this->_alias(args, cmd_line_str);
         }
         else if (command == "unalias") {
             this->_unalias(args);
         }
 
         else if (this->aliasMap.find(command) != this->aliasMap.end()) {
-            std::string aliasCommand = this->aliasMap[command];
+            std::string aliasCommand = this->aliasMap[command]->_parsed_command;
             for (const std::string & arg : args) {
                 aliasCommand += " " + arg;
             }
@@ -506,6 +524,8 @@ void SmallShell::executeCommand(const char *cmd_line) {
             strcpy(commandChar, aliasCommand.c_str());
             this->executeCommand(commandChar);
             delete[] commandChar;
+            return;
+
         }
         bool BACKGROUND_FLAG = (_isBackgroundComamnd(cmd_line)) &&
             (this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0);
