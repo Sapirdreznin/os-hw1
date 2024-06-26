@@ -8,6 +8,8 @@
 #include <iomanip>
 #include <regex>
 #include <fcntl.h>
+#include <pwd.h>
+#include <grp.h>
 #include "Commands.h"
 
 using namespace std;
@@ -88,6 +90,31 @@ Job::Job(int _pid, int _jobId, std::string& _command){
     this->command = _command;
 }
 
+int close_wrapper(int fd) {
+    int close_res = close(fd);
+    if (close_res == -1) {
+        perror("smash error: close failed");
+    }
+    return close_res;
+}
+
+int open_wrapper(const char* __file, int __oflag) {
+    int file_fd = open(__file, __oflag);
+    if (file_fd == -1) {
+        perror("smash error: open failed");
+    }
+    return file_fd;
+}
+
+int read_wrapper(int file_fd, void* buffer, size_t nbytes) {
+    ssize_t bytesRead = read(file_fd, buffer, nbytes);
+    if (bytesRead == -1) {
+        perror("smash error: read failed");
+        close_wrapper(file_fd);
+    }
+    return bytesRead;
+}
+
 int Job::get_pid() {
     return this->pid;
 }
@@ -110,7 +137,7 @@ SmallShell::SmallShell() {
 // TODO: add your implementation
     internalCommands = {"chprompt", "showpid", "pwd", "cd", "jobs", "fg", "quit", "kill",
         "alias", "unalias"};
-    specialCommands = {};
+    specialCommands = {"getuser"};
     this->shellPromptLine = std::string("smash");
     this->smashPid = getpid();
     this->oldPwd = nullptr;
@@ -455,14 +482,66 @@ std::pair<int, int> SmallShell::handle_redirection(std::vector<std::string> &arg
         append_flag = O_APPEND;
     }
     std::string& path = args[args.size() - 1];
-    int file_fd = open(path.c_str(), O_WRONLY | O_CREAT | append_flag, 0644);
-    if (file_fd == -1) {
-        perror("smash error: open failed");
-    }
+    int file_fd = open_wrapper(path.c_str(),O_WRONLY | O_CREAT | append_flag);
+    // int file_fd = open(path.c_str(), O_WRONLY | O_CREAT | append_flag);
+    // if (file_fd == -1) {
+        // perror("smash error: open failed");
+    // }
     args.pop_back();
     args.pop_back();
     int stdOut = this->replace_stdout_with_file(file_fd);
     return std::make_pair(file_fd, stdOut);
+}
+int extract_first_int(const char* text) {
+    const char* end_pointer = text;
+    while (*end_pointer && (*end_pointer < '0' || *end_pointer > '9')) {
+        ++end_pointer;
+    }
+    int number = 0;
+    while (*end_pointer && (*end_pointer >= '0' && *end_pointer <= '9')) {
+        number = number * 10 + (*end_pointer - '0');
+        ++end_pointer;
+    }
+    return number;
+
+    
+}
+void getProcessUserAndGroup(std::vector<std::string>& args) {
+    int pid = std::stoi(args[0]); // Convert string to int
+    // Construct the path to the process's status file in the /proc filesystem
+    char path[256];
+    snprintf(path, sizeof(path), "/proc/%d/status", pid);
+
+    // Open the status file
+    int fd = open_wrapper(path, O_RDONLY);
+    // int fd = open(path, O_RDONLY);
+    // if (fd == -1) {
+        // perror("smash error: open failed");
+        // return;
+    // }
+
+    // Read the contents of the file
+    char buffer[4096];
+    ssize_t bytesRead = read_wrapper(fd, buffer, sizeof(buffer) - 1);
+    // ssize_t bytesRead = read(fd, buffer, sizeof(buffer) - 1);
+    // if (bytesRead == -1) {
+    //     perror("smash error: read failed");
+    //     close(fd);
+    //     return;
+    // }
+    // Null-terminate the buffer
+    buffer[bytesRead] = '\0';
+
+    // Close the file
+    close_wrapper(fd);
+    // Parse the buffer to extract Uid and Gid
+    const char *uidStr = strstr(buffer, "Uid:");
+    const char *gidStr = strstr(buffer, "Gid:");
+    char* user_name = getpwuid(extract_first_int(uidStr))->pw_name;
+    char* group_name = getgrgid(extract_first_int(gidStr))->gr_name;
+
+    std::cout << "User: " << user_name << std::endl;
+    std::cout << "Group: " << group_name << std::endl;
 }
 
 
@@ -514,6 +593,9 @@ void SmallShell::executeCommand(const char *cmd_line) {
         else if (command == "unalias") {
             this->_unalias(args);
         }
+        else if (command == "getuser") {
+            getProcessUserAndGroup(args);
+        }
 
         else if (this->aliasMap.find(command) != this->aliasMap.end()) {
             std::string aliasCommand = this->aliasMap[command]->_parsed_command;
@@ -545,15 +627,11 @@ void SmallShell::executeCommand(const char *cmd_line) {
             }
             if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
                 dup2(stdOut, 1);
-                int close_res = close(file_fd);
-                if (close_res == -1) {
-                    perror("smash error: close failed");
-                }
+                close_wrapper(file_fd);
             }
         }
         else {
-            auto it = this->internalCommands.find(command);
-            if (it == this->internalCommands.end()) {
+            if ((this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0)) {
                 if (this->isComplexCommand(cmd_line_str)) {
                     this->runComplexCommand(cmd_line_str);
                 }
