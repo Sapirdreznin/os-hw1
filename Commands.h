@@ -8,6 +8,7 @@
 
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
+#define MAX_PWD_PATH 1001
 
 class Command {
 // TODO: Add your data members
@@ -224,13 +225,20 @@ private:
     // std::map<int, std::string> jobsMap;
     std::map<int, Job*> jobsMap;
     std::map<std::string, std::string> aliasMap;
+    std::string shellPromptLine;
+    pid_t smashPid;
+    char* oldPwd;
 
 
     std::vector<std::string> splitString(const std::string& str);
     void removeLastCharIfAmpersand(std::string& str);
+    void _chprompt(std::vector<std::string>& args);
+    void _showpid(std::vector<std::string>& args);
     void _pwd();
+    void _cd(std::vector<std::string>& args);
     void _jobs();
-    void _quit(std::vector<std::string>& args);
+    void _fg(std::vector<std::string>& args);
+    void _quit(std::vector<std::string>& arfgs);
     void _kill(std::vector<std::string>& args);
     void _alias(std::vector<std::string>& args);
     void _unalias(std::vector<std::string>& args);
@@ -248,6 +256,7 @@ private:
     std::vector<std::string> splitStringBySpace(const std::string& str);
     void updateFinishedJobs();
     int getMaxJobId();
+    void changePrevious();
 
 public:
     Command *CreateCommand(const char *cmd_line);
@@ -264,6 +273,11 @@ public:
     ~SmallShell();
 
     void executeCommand(const char *cmd_line);
+    std::string getPromptLine() { return this->shellPromptLine; }
+    void setPromptLine(std::string line) { this->shellPromptLine = std::move(line);}
+    pid_t getPid() { return this->smashPid; }
+    char* getOldPwd() { return this->oldPwd; }
+    void setOldPwd(char* old_pwd) { this->oldPwd = old_pwd; }
     // TODO: add extra methods as needed
 };
 

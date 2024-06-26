@@ -107,6 +107,9 @@ SmallShell::SmallShell() {
     internalCommands = {"chprompt", "showpid", "pwd", "cd", "jobs", "fg", "quit", "kill",
         "alias", "unalias"};
     specialCommands = {};
+    this->shellPromptLine = std::string("smash");
+    this->smashPid = getpid();
+    this->oldPwd = nullptr;
 
 }
 
@@ -147,6 +150,58 @@ void SmallShell::_pwd() {
     }
     else {
         perror("smash error: getcwd failed");
+    }
+}
+
+void SmallShell::_cd(std::vector<std::string> &args)
+{
+    SmallShell& smash = SmallShell::getInstance();
+    if (args.size() == 0) {
+        return;
+    }
+    if (args.size() > 1) {
+        cerr << "smash error: cd: too many arguments" << endl;
+    }
+    else if (args[0] == "-") {
+        this->changePrevious();
+    }
+    else {
+        char *buff = new char[MAX_PWD_PATH];
+        if (getcwd(buff, MAX_PWD_PATH) == nullptr) {
+            perror("smash error: getcwd failed");
+            delete[] buff;
+        } else if (chdir(args[0].c_str()) < 0) {
+            perror("smash error: chdir failed");
+            delete[] buff;
+        } else {
+            delete[] smash.getOldPwd();
+            smash.setOldPwd(buff);
+        }
+    }
+    return;
+}
+
+void SmallShell::changePrevious()
+{
+    SmallShell& smash = SmallShell::getInstance();
+    if (!this->oldPwd) {
+        cerr << "smash error: cd: OLDPWD not set" << endl;
+    }
+        /// IF old PWD exists
+    else {
+        char *buff = new char[MAX_PWD_PATH];
+        if (getcwd(buff, MAX_PWD_PATH) == nullptr) {
+            cerr << "smash error: getcwd failed" << endl;
+            delete[] buff;
+
+        } else if (chdir(this->oldPwd) < 0) {
+            perror("smash error: chdir failed");
+
+        } else {
+            delete[] smash.getOldPwd();
+            smash.setOldPwd(buff);
+        }
+
     }
 }
 
@@ -209,6 +264,10 @@ void SmallShell::_jobs() {
     for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
         std::cout <<"[" << it->first << "] " << it->second->get_command() << std::endl;
     }
+}
+
+void SmallShell::_fg(std::vector<std::string> &args)
+{
 }
 
 void SmallShell::_quit(std::vector<std::string>& args) {
@@ -310,6 +369,26 @@ void SmallShell::_unalias(std::vector<std::string> &args) {
     }
 }
 
+void SmallShell::_chprompt(std::vector<std::string>& args)
+{
+    if (args.size() > 1 || args.size() < 0) {
+        // error
+    }
+    SmallShell& smash = SmallShell::getInstance();
+    if (args.size() == 0 ) {
+        smash.setPromptLine(std::string("smash"));
+    }
+    else if (args.size() == 1) {
+        smash.setPromptLine(args[0]);
+    }
+}
+
+void SmallShell::_showpid(std::vector<std::string>& args)
+{
+    SmallShell& smash = SmallShell::getInstance();
+    cout << "smash pid is "<< smash.getPid() << endl;
+}
+
 
 bool SmallShell::isComplexCommand(std::string &command) {
     return command.find('*') != std::string::npos || command.find('?') != std::string::npos;
@@ -396,7 +475,15 @@ void SmallShell::executeCommand(const char *cmd_line) {
         else if (command == "jobs") {
             this->_jobs();
         }
-
+        else if (command == "chprompt") {
+            this->_chprompt(args);
+        }
+        else if (command == "showpid") {
+            this->_showpid(args);
+        }
+        else if (command == "cd") {
+            this->_cd(args);
+        }
         else if (command == "quit") {
             this->_quit(args);
         }
