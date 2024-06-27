@@ -99,7 +99,7 @@ int close_wrapper(int fd) {
 }
 
 int open_wrapper(const char* __file, int __oflag) {
-    int file_fd = open(__file, __oflag);
+    int file_fd = open(__file, __oflag, 0644);
     if (file_fd == -1) {
         perror("smash error: open failed");
     }
