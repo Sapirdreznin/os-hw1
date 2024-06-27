@@ -344,16 +344,20 @@ void SmallShell::_quit(std::vector<std::string>& args) {
 }
 
 void SmallShell::_kill(std::vector<std::string>& args){
-    if (args.size() != 2) {
-        // error
+    if (args.empty()) {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
     }
     if (args[0][0] != '-') {
-        // error
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
     }
-    else {
-        args[0].erase(args[0].begin());  // Erase the first character
+    if (args.size() < 2) {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
     }
 
+    args[0].erase(args[0].begin());  // Erase the first character
     int jobId;
     int sigNum;
     try {
@@ -361,16 +365,20 @@ void SmallShell::_kill(std::vector<std::string>& args){
         jobId = std::stoi(args[1]); // Convert string to int
 
     } catch (const std::exception& e) {
-        std::cerr << "Conversion error: " << e.what() << std::endl;
+        std::cerr << "smash error: kill: job-id " << args[1] << " does not exist" << std::endl;
         // error
         return;
     }
 
     if (this->jobsMap.count(jobId) == 0) {
         // error
+        std::cerr << "smash error: kill: job-id " << args[1] << " does not exist" << std::endl;
     }
-
-    kill(this->jobsMap[jobId]->get_pid(), sigNum);
+    else {
+        int pid = this->jobsMap[jobId]->get_pid();
+        kill(pid, sigNum);
+        std::cout << "signal number " << sigNum << " was sent to pid " << pid << std::endl;
+    }
 
 }
 
@@ -403,7 +411,7 @@ void SmallShell::_alias(std::vector<std::string> &args, std::string& real_comman
             }
             else {
                 if ((command[0] == '\'') && (args.back().back() == '\'')) {
-                    for (int i=1; i < args.size(); i++) {
+                    for (unsigned int i=1; i < args.size(); i++) {
                         command += " " + args[i];
                     }
                     command = command.substr(1, command.length() - 2);
