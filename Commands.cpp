@@ -84,6 +84,7 @@ void _removeBackgroundSign(char *cmd_line) {
 
 // TODO: Add your implementation for classes in Commands.h 
 
+
 Job::Job(int _pid, int _jobId, std::string& _command){
     this->pid = _pid;
     this->jobId = _jobId;
@@ -115,6 +116,33 @@ int read_wrapper(int file_fd, void* buffer, size_t nbytes) {
     return bytesRead;
 }
 
+int read_from_config() {
+    int fd = open_wrapper(CONFIG, O_RDONLY);
+    char buffer[128];
+    ssize_t bytesRead = read_wrapper(fd, buffer, sizeof(buffer) - 1);
+    buffer[bytesRead] = '\0';
+    close_wrapper(fd);
+
+    return extract_first_int(buffer);
+}
+
+void update_config(int pid) {
+    int fd = open_wrapper(CONFIG,O_WRONLY | O_CREAT);
+
+    std::string pidString = "Process ID: " + std::to_string(pid) + "\n";
+
+    ssize_t bytesWritten = write(fd, pidString.c_str(), pidString.size());
+    if (bytesWritten == -1) {
+        perror("write() error");
+    }
+    close_wrapper(fd);
+}
+
+void reset_config() {
+    update_config(0);
+}
+
+
 int Job::get_pid() {
     return this->pid;
 }
@@ -141,6 +169,8 @@ SmallShell::SmallShell() {
     this->shellPromptLine = std::string("smash");
     this->smashPid = getpid();
     this->oldPwd = nullptr;
+    this->need_to_fork = true;
+    reset_config();
 
 }
 
@@ -506,29 +536,41 @@ int extract_first_int(const char* text) {
 
     
 }
-void getProcessUserAndGroup(std::vector<std::string>& args) {
-    int pid = std::stoi(args[0]); // Convert string to int
-    // Construct the path to the process's status file in the /proc filesystem
+
+int ConvertToInt(const std::string& str) {
+    try {
+        int res = std::stoi(str);
+        return res;
+    } catch (const std::invalid_argument& e) {
+        // Thrown if the input is not a valid integer
+        return -1;
+    } catch (const std::out_of_range& e) {
+        // Thrown if the input is out of the range of representable values
+        return -1;
+    }
+}
+
+void SmallShell::_getuser(std::vector<std::string>& args) {
+    if (args.empty()) {
+        std::cerr << "smash error: getuser: process <pid> does not exist" << std::endl;
+    }
+    else if (args.size() > 1) {
+        std::cerr << "smash error: getuser: too many arguments" << std::endl;
+    }
+
+    int pid = ConvertToInt(args[0]);
+    if (pid < 0) {
+        std::cerr << "smash error: getuser: process <pid> does not exist" << std::endl;
+    }
     char path[256];
     snprintf(path, sizeof(path), "/proc/%d/status", pid);
 
     // Open the status file
     int fd = open_wrapper(path, O_RDONLY);
-    // int fd = open(path, O_RDONLY);
-    // if (fd == -1) {
-        // perror("smash error: open failed");
-        // return;
-    // }
 
     // Read the contents of the file
     char buffer[4096];
     ssize_t bytesRead = read_wrapper(fd, buffer, sizeof(buffer) - 1);
-    // ssize_t bytesRead = read(fd, buffer, sizeof(buffer) - 1);
-    // if (bytesRead == -1) {
-    //     perror("smash error: read failed");
-    //     close(fd);
-    //     return;
-    // }
     // Null-terminate the buffer
     buffer[bytesRead] = '\0';
 
@@ -545,8 +587,8 @@ void getProcessUserAndGroup(std::vector<std::string>& args) {
 }
 
 
-
 void SmallShell::executeCommand(const char *cmd_line) {
+    this->need_to_fork = true;
     this->updateFinishedJobs();
     std::string cmd_line_str = cmd_line;
     this->removeLastCharIfAmpersand(cmd_line_str);
@@ -567,37 +609,48 @@ void SmallShell::executeCommand(const char *cmd_line) {
 
 
         if (command == "pwd") {
+            this->need_to_fork = false;
             this->_pwd();
         }
         else if (command == "jobs") {
+            this->need_to_fork = false;
             this->_jobs();
         }
         else if (command == "chprompt") {
+            this->need_to_fork = false;
             this->_chprompt(args);
         }
         else if (command == "showpid") {
+            this->need_to_fork = false;
             this->_showpid(args);
         }
         else if (command == "cd") {
+            this->need_to_fork = false;
             this->_cd(args);
         }
         else if (command == "quit") {
+            this->need_to_fork = false;
             this->_quit(args);
         }
         else if (command == "kill") {
+            this->need_to_fork = false;
             this->_kill(args);
         }
         else if (command == "alias") {
+            this->need_to_fork = false;
             this->_alias(args, cmd_line_str);
         }
         else if (command == "unalias") {
+            this->need_to_fork = false;
             this->_unalias(args);
         }
         else if (command == "getuser") {
-            getProcessUserAndGroup(args);
+            this->need_to_fork = false;
+            this->_getuser(args);
         }
 
         else if (this->aliasMap.find(command) != this->aliasMap.end()) {
+            this->need_to_fork = false;
             std::string aliasCommand = this->aliasMap[command]->_parsed_command;
             for (const std::string & arg : args) {
                 aliasCommand += " " + arg;
@@ -611,19 +664,41 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         bool BACKGROUND_FLAG = (_isBackgroundComamnd(cmd_line)) &&
             (this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0);
+        const int jobId = this->getMaxJobId() + 1;
+
+        if (!need_to_fork) {
+            if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
+                dup2(stdOut, 1);
+                close_wrapper(file_fd);
+            }
+            return;
+        }
         pid_t pid = fork();
         if (pid < 0) {
             perror("smash error: fork failed");
         }
-        const int jobId = this->getMaxJobId() + 1;
         if (pid != 0) { // if father
             if (BACKGROUND_FLAG){
                 Job* job = new Job(pid, jobId, cmd_line_str);
                 this->jobsMap[jobId] = job;
             }
             else {
+                // int fd = open_wrapper(CONFIG,O_WRONLY | O_CREAT);
+                //
+                // std::string pidString = "Process ID: " + std::to_string(pid) + "\n";
+                //
+                // ssize_t bytesWritten = write(fd, pidString.c_str(), pidString.size());
+                // if (bytesWritten == -1) {
+                //     perror("write() error");
+                //     close_wrapper(fd);
+                //     return;
+                // }
+                update_config(pid);
                 int status;
                 waitpid(pid, &status, 0);
+                reset_config();
+
+
             }
             if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
                 dup2(stdOut, 1);
@@ -631,6 +706,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
             }
         }
         else {
+            setpgrp();
             if ((this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0)) {
                 if (this->isComplexCommand(cmd_line_str)) {
                     this->runComplexCommand(cmd_line_str);
