@@ -333,7 +333,7 @@ void SmallShell::_fg(std::vector<std::string> &args)
 
 void SmallShell::_quit(std::vector<std::string>& args) {
     if (!args.empty() && args[0] == "kill") {
-        std::cout << "sending SIGKILL signal to "<< this->jobsMap.size() <<  " jobs:" << std::endl;
+        std::cout << "smash: sending SIGKILL signal to "<< this->jobsMap.size() <<  " jobs:" << std::endl;
         for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
             int pid = it->second->get_pid();
             kill(pid, 9);
