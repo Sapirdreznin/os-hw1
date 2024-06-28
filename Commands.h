@@ -66,6 +66,7 @@ private:
     void _alias(std::vector<std::string>& args, std::string& real_command);
     void _unalias(std::vector<std::string>& args);
     void _getuser(std::vector<std::string>& args);
+    void _listdir(std::vector<std::string>& args);
 
 
     bool isComplexCommand(std::string& command);

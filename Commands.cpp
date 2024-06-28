@@ -12,16 +12,15 @@
 #include <grp.h>
 #include "Commands.h"
 #include <cmath>
+#include <sys/stat.h>
+#include <sys/syscall.h>
 
 using namespace std;
 
 #define DIGIT_ASCII_DIFF 48
 #define DIGIT_MULTIPLE 10
-
-const std::string WHITESPACE = " \n\r\t\f\v";
-const int READ = 0;
-const int WRITE = 1;
-
+#define BUF_SIZE 1024
+#define PATH_MAX 4096
 
 #if 0
 #define FUNC_ENTRY()  \
@@ -33,6 +32,17 @@ const int WRITE = 1;
 #define FUNC_ENTRY()
 #define FUNC_EXIT()
 #endif
+
+const std::string WHITESPACE = " \n\r\t\f\v";
+const int READ = 0;
+const int WRITE = 1;
+
+struct linux_dirent {
+    unsigned long   d_ino;      /* Inode number */
+    unsigned long   d_off;      /* Offset to next dirent */
+    unsigned short  d_reclen;   /* Length of this dirent */
+    char            d_name[];   /* Filename (null-terminated) */
+};
 
 string _ltrim(const std::string &s) {
     size_t start = s.find_first_not_of(WHITESPACE);
@@ -104,9 +114,6 @@ bool is_digits_only(const std::string& s) {
     return std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
-// TODO: Add your implementation for classes in Commands.h 
-
-
 Job::Job(int _pid, int _jobId, std::string& _command){
     this->pid = _pid;
     this->jobId = _jobId;
@@ -176,6 +183,96 @@ std::string Job::get_command() {
     return this->command;
 }
 
+std::string getCurrentDirectory() {
+    char buffer[PATH_MAX];
+    if (getcwd(buffer, sizeof(buffer)) != nullptr) {
+        return std::string(buffer);
+    } else {
+        perror("getcwd");
+        return std::string();
+    }
+}
+
+
+std::string getFileType(const std::string& path) {
+    struct stat statbuf;
+    if (lstat(path.c_str(), &statbuf) != 0) {
+        return "unknown";
+    }
+
+    if (S_ISDIR(statbuf.st_mode)) {
+        return "directory";
+    } else if (S_ISREG(statbuf.st_mode)) {
+        return "file";
+    } else if (S_ISLNK(statbuf.st_mode)) {
+        return "link";
+    } else {
+        return "other";
+    }
+}
+
+// Comparator to sort files before directories alphabetically
+bool compareEntries(const std::pair<std::string, std::string>& a, const std::pair<std::string, std::string>& b)
+{
+    if (a.second == b.second)
+    {
+        return a.first < b.first;
+    }
+    if (a.second == "file" && b.second != "file")
+    {
+        return true;
+    }
+    if (a.second != "file" && b.second == "file")
+    {
+        return false;
+    }
+    return a.first < b.first;
+}
+
+void processDirectory(const std::string& directoryPath, std::vector<std::pair<std::string, std::string>>& entries) {
+    int fd = open(directoryPath.c_str(), O_RDONLY | O_DIRECTORY);
+    if (fd == -1) {
+        perror("open");
+        return;
+    }
+
+    char buf[BUF_SIZE];
+    int nread;
+
+    while ((nread = syscall(SYS_getdents, fd, buf, BUF_SIZE)) > 0) {
+        for (int bpos = 0; bpos < nread;) {
+            struct linux_dirent* d = (struct linux_dirent*) (buf + bpos);
+            std::string name(d->d_name);
+
+            if (name == "." || name == "..") {
+                bpos += d->d_reclen;
+                continue;
+            }
+            std::string path;
+            if (directoryPath.back() == '/') {
+                path = directoryPath + name;
+            } else {
+                path = directoryPath + "/" + name;
+            }
+            std::string type = getFileType(path);
+            entries.emplace_back(path, type);
+
+            if (type == "directory") {
+                processDirectory(path, entries);
+            }
+
+            bpos += d->d_reclen;
+        }
+    }
+
+    if (nread == -1) {
+        perror("getdents");
+    }
+
+    close(fd);
+}
+
+
 
 Command::Command(std::string& real_command, std::string& parsed_command) {
     this->_real_command = real_command;
@@ -225,8 +322,7 @@ Command *SmallShell::CreateCommand(const char *cmd_line) {
 }
 
 void SmallShell::_pwd() {
-    const size_t bufferSize = 1024;
-    char buffer[bufferSize];
+    char buffer[BUF_SIZE];
 
     if (getcwd(buffer, sizeof(buffer)) != NULL) {
         std::cout << buffer << std::endl;
@@ -671,6 +767,39 @@ void SmallShell::_getuser(std::vector<std::string>& args) {
     std::cout << "Group: " << group_name << std::endl;
 }
 
+void SmallShell::_listdir(std::vector<std::string>& args) 
+{
+    std::string mainPath;
+    if (args.size() > 1) 
+    {
+        std::cerr << "smash error: listdir: too many arguments" << std::endl;
+        return;
+    }
+    if (args.size() == 0)
+    {
+        mainPath = getCurrentDirectory();
+    } else {
+        mainPath = args[0];
+    }
+    std::vector<std::pair<std::string, std::string>> entries;
+    processDirectory(mainPath, entries);
+
+    std::sort(entries.begin(), entries.end(), compareEntries);
+
+    for (const auto& entry : entries) {
+        if (entry.second == "link")
+        {
+            char linkTarget[PATH_MAX];
+            ssize_t len = readlink(entry.first.c_str(), linkTarget, sizeof(linkTarget)-1);
+            linkTarget[len] = '\0';
+            std::cout << entry.second << ": " << entry.first << " -> " << std::string(linkTarget) << std::endl;
+        }
+        else {
+            std::cout << entry.second << ": " << entry.first << std::endl;
+        }
+    }
+}
+
 
 void SmallShell::executeCommand(const char *cmd_line) {
     this->need_to_fork = true;
@@ -735,6 +864,10 @@ void SmallShell::executeCommand(const char *cmd_line) {
         else if (command == "getuser") {
             this->need_to_fork = false;
             this->_getuser(args);
+        }
+        else if (command == "listdir") {
+            this->need_to_fork = false;
+            this->_listdir(args);
         }
 
         else if (this->aliasMap.find(command) != this->aliasMap.end()) {
