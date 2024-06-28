@@ -9,7 +9,13 @@
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 #define MAX_PWD_PATH 1001
+#define CONFIG "config.txt"
 
+int close_wrapper(int fd);
+int open_wrapper(const char* __file, int __oflag);
+int read_wrapper(int file_fd, void* buffer, size_t nbytes);
+int extract_first_int(const char* text);
+int read_from_config();
 
 class Job {
 private:
@@ -43,6 +49,7 @@ private:
     std::string shellPromptLine;
     pid_t smashPid;
     char* oldPwd;
+    bool need_to_fork;
 
 
 

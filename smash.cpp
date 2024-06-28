@@ -7,11 +7,6 @@
 
 
 int main(int argc, char *argv[]) {
-// int main() {
-
-    int x = 1;
-    std::cout << "Hello, World! this is a temp message" << std::endl;
-    
     if (signal(SIGINT, ctrlCHandler) == SIG_ERR) {
         perror("smash error: failed to set ctrl-C handler");
     }

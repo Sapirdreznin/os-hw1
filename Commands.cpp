@@ -8,6 +8,8 @@
 #include <iomanip>
 #include <regex>
 #include <fcntl.h>
+#include <pwd.h>
+#include <grp.h>
 #include "Commands.h"
 #include <cmath>
 
@@ -104,11 +106,64 @@ bool is_digits_only(const std::string& s) {
 
 // TODO: Add your implementation for classes in Commands.h 
 
+
 Job::Job(int _pid, int _jobId, std::string& _command){
     this->pid = _pid;
     this->jobId = _jobId;
     this->command = _command;
 }
+
+int close_wrapper(int fd) {
+    int close_res = close(fd);
+    if (close_res == -1) {
+        perror("smash error: close failed");
+    }
+    return close_res;
+}
+
+int open_wrapper(const char* __file, int __oflag) {
+    int file_fd = open(__file, __oflag, 0644);
+    if (file_fd == -1) {
+        perror("smash error: open failed");
+    }
+    return file_fd;
+}
+
+int read_wrapper(int file_fd, void* buffer, size_t nbytes) {
+    ssize_t bytesRead = read(file_fd, buffer, nbytes);
+    if (bytesRead == -1) {
+        perror("smash error: read failed");
+        close_wrapper(file_fd);
+    }
+    return bytesRead;
+}
+
+int read_from_config() {
+    int fd = open_wrapper(CONFIG, O_RDONLY);
+    char buffer[128];
+    ssize_t bytesRead = read_wrapper(fd, buffer, sizeof(buffer) - 1);
+    buffer[bytesRead] = '\0';
+    close_wrapper(fd);
+
+    return extract_first_int(buffer);
+}
+
+void update_config(int pid) {
+    int fd = open_wrapper(CONFIG,O_WRONLY | O_CREAT);
+
+    std::string pidString = "Process ID: " + std::to_string(pid) + "\n";
+
+    ssize_t bytesWritten = write(fd, pidString.c_str(), pidString.size());
+    if (bytesWritten == -1) {
+        perror("write() error");
+    }
+    close_wrapper(fd);
+}
+
+void reset_config() {
+    update_config(0);
+}
+
 
 int Job::get_pid() {
     return this->pid;
@@ -132,10 +187,12 @@ SmallShell::SmallShell() {
 // TODO: add your implementation
     internalCommands = {"chprompt", "showpid", "pwd", "cd", "jobs", "fg", "quit", "kill",
         "alias", "unalias"};
-    specialCommands = {};
+    specialCommands = {"getuser"};
     this->shellPromptLine = std::string("smash");
     this->smashPid = getpid();
     this->oldPwd = nullptr;
+    this->need_to_fork = true;
+    reset_config();
 
 }
 
@@ -353,7 +410,7 @@ void SmallShell::_fg(std::vector<std::string> &args)
 
 void SmallShell::_quit(std::vector<std::string>& args) {
     if (!args.empty() && args[0] == "kill") {
-        std::cout << "sending SIGKILL signal to "<< this->jobsMap.size() <<  " jobs:" << std::endl;
+        std::cout << "smash: sending SIGKILL signal to "<< this->jobsMap.size() <<  " jobs:" << std::endl;
         for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
             int pid = it->second->get_pid();
             kill(pid, 9);
@@ -364,16 +421,20 @@ void SmallShell::_quit(std::vector<std::string>& args) {
 }
 
 void SmallShell::_kill(std::vector<std::string>& args){
-    if (args.size() != 2) {
-        // error
+    if (args.empty()) {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
     }
     if (args[0][0] != '-') {
-        // error
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
     }
-    else {
-        args[0].erase(args[0].begin());  // Erase the first character
+    if (args.size() < 2) {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+        return;
     }
 
+    args[0].erase(args[0].begin());  // Erase the first character
     int jobId;
     int sigNum;
     try {
@@ -381,16 +442,20 @@ void SmallShell::_kill(std::vector<std::string>& args){
         jobId = std::stoi(args[1]); // Convert string to int
 
     } catch (const std::exception& e) {
-        std::cerr << "Conversion error: " << e.what() << std::endl;
+        std::cerr << "smash error: kill: job-id " << args[1] << " does not exist" << std::endl;
         // error
         return;
     }
 
     if (this->jobsMap.count(jobId) == 0) {
         // error
+        std::cerr << "smash error: kill: job-id " << args[1] << " does not exist" << std::endl;
     }
-
-    kill(this->jobsMap[jobId]->get_pid(), sigNum);
+    else {
+        int pid = this->jobsMap[jobId]->get_pid();
+        kill(pid, sigNum);
+        std::cout << "signal number " << sigNum << " was sent to pid " << pid << std::endl;
+    }
 
 }
 
@@ -423,7 +488,7 @@ void SmallShell::_alias(std::vector<std::string> &args, std::string& real_comman
             }
             else {
                 if ((command[0] == '\'') && (args.back().back() == '\'')) {
-                    for (int i=1; i < args.size(); i++) {
+                    for (unsigned int i=1; i < args.size(); i++) {
                         command += " " + args[i];
                     }
                     command = command.substr(1, command.length() - 2);
@@ -532,19 +597,83 @@ std::pair<int, int> SmallShell::handle_redirection(std::vector<std::string> &arg
         append_flag = O_APPEND;
     }
     std::string& path = args[args.size() - 1];
-    int file_fd = open(path.c_str(), O_WRONLY | O_CREAT | append_flag, 0644);
-    if (file_fd == -1) {
-        perror("smash error: open failed");
-    }
+    int file_fd = open_wrapper(path.c_str(),O_WRONLY | O_CREAT | append_flag);
+    // int file_fd = open(path.c_str(), O_WRONLY | O_CREAT | append_flag);
+    // if (file_fd == -1) {
+        // perror("smash error: open failed");
+    // }
     args.pop_back();
     args.pop_back();
     int stdOut = this->replace_stdout_with_file(file_fd);
     return std::make_pair(file_fd, stdOut);
 }
+int extract_first_int(const char* text) {
+    const char* end_pointer = text;
+    while (*end_pointer && (*end_pointer < '0' || *end_pointer > '9')) {
+        ++end_pointer;
+    }
+    int number = 0;
+    while (*end_pointer && (*end_pointer >= '0' && *end_pointer <= '9')) {
+        number = number * 10 + (*end_pointer - '0');
+        ++end_pointer;
+    }
+    return number;
 
+    
+}
+
+int ConvertToInt(const std::string& str) {
+    try {
+        int res = std::stoi(str);
+        return res;
+    } catch (const std::invalid_argument& e) {
+        // Thrown if the input is not a valid integer
+        return -1;
+    } catch (const std::out_of_range& e) {
+        // Thrown if the input is out of the range of representable values
+        return -1;
+    }
+}
+
+void SmallShell::_getuser(std::vector<std::string>& args) {
+    if (args.empty()) {
+        std::cerr << "smash error: getuser: process <pid> does not exist" << std::endl;
+    }
+    else if (args.size() > 1) {
+        std::cerr << "smash error: getuser: too many arguments" << std::endl;
+    }
+
+    int pid = ConvertToInt(args[0]);
+    if (pid < 0) {
+        std::cerr << "smash error: getuser: process <pid> does not exist" << std::endl;
+    }
+    char path[256];
+    snprintf(path, sizeof(path), "/proc/%d/status", pid);
+
+    // Open the status file
+    int fd = open_wrapper(path, O_RDONLY);
+
+    // Read the contents of the file
+    char buffer[4096];
+    ssize_t bytesRead = read_wrapper(fd, buffer, sizeof(buffer) - 1);
+    // Null-terminate the buffer
+    buffer[bytesRead] = '\0';
+
+    // Close the file
+    close_wrapper(fd);
+    // Parse the buffer to extract Uid and Gid
+    const char *uidStr = strstr(buffer, "Uid:");
+    const char *gidStr = strstr(buffer, "Gid:");
+    char* user_name = getpwuid(extract_first_int(uidStr))->pw_name;
+    char* group_name = getgrgid(extract_first_int(gidStr))->gr_name;
+
+    std::cout << "User: " << user_name << std::endl;
+    std::cout << "Group: " << group_name << std::endl;
+}
 
 
 void SmallShell::executeCommand(const char *cmd_line) {
+    this->need_to_fork = true;
     this->updateFinishedJobs();
     std::string cmd_line_str = cmd_line;
     this->removeLastCharIfAmpersand(cmd_line_str);
@@ -565,37 +694,51 @@ void SmallShell::executeCommand(const char *cmd_line) {
 
 
         if (command == "pwd") {
+            this->need_to_fork = false;
             this->_pwd();
         }
         else if (command == "jobs") {
+            this->need_to_fork = false;
             this->_jobs();
         }
         else if (command == "chprompt") {
+            this->need_to_fork = false;
             this->_chprompt(args);
         }
         else if (command == "showpid") {
+            this->need_to_fork = false;
             this->_showpid(args);
         }
         else if (command == "cd") {
+            this->need_to_fork = false;
             this->_cd(args);
         }
         else if (command == "fg") {
             this->_fg(args);
         }
         else if (command == "quit") {
+            this->need_to_fork = false;
             this->_quit(args);
         }
         else if (command == "kill") {
+            this->need_to_fork = false;
             this->_kill(args);
         }
         else if (command == "alias") {
+            this->need_to_fork = false;
             this->_alias(args, cmd_line_str);
         }
         else if (command == "unalias") {
+            this->need_to_fork = false;
             this->_unalias(args);
+        }
+        else if (command == "getuser") {
+            this->need_to_fork = false;
+            this->_getuser(args);
         }
 
         else if (this->aliasMap.find(command) != this->aliasMap.end()) {
+            this->need_to_fork = false;
             std::string aliasCommand = this->aliasMap[command]->_parsed_command;
             for (const std::string & arg : args) {
                 aliasCommand += " " + arg;
@@ -609,31 +752,50 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         bool BACKGROUND_FLAG = (_isBackgroundComamnd(cmd_line)) &&
             (this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0);
+        const int jobId = this->getMaxJobId() + 1;
+
+        if (!need_to_fork) {
+            if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
+                dup2(stdOut, 1);
+                close_wrapper(file_fd);
+            }
+            return;
+        }
         pid_t pid = fork();
         if (pid < 0) {
             perror("smash error: fork failed");
         }
-        const int jobId = this->getMaxJobId() + 1;
         if (pid != 0) { // if father
             if (BACKGROUND_FLAG){
                 Job* job = new Job(pid, jobId, cmd_line_str);
                 this->jobsMap[jobId] = job;
             }
             else {
+                // int fd = open_wrapper(CONFIG,O_WRONLY | O_CREAT);
+                //
+                // std::string pidString = "Process ID: " + std::to_string(pid) + "\n";
+                //
+                // ssize_t bytesWritten = write(fd, pidString.c_str(), pidString.size());
+                // if (bytesWritten == -1) {
+                //     perror("write() error");
+                //     close_wrapper(fd);
+                //     return;
+                // }
+                update_config(pid);
                 int status;
                 waitpid(pid, &status, 0);
+                reset_config();
+
+
             }
             if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
                 dup2(stdOut, 1);
-                int close_res = close(file_fd);
-                if (close_res == -1) {
-                    perror("smash error: close failed");
-                }
+                close_wrapper(file_fd);
             }
         }
         else {
-            auto it = this->internalCommands.find(command);
-            if (it == this->internalCommands.end()) {
+            setpgrp();
+            if ((this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0)) {
                 if (this->isComplexCommand(cmd_line_str)) {
                     this->runComplexCommand(cmd_line_str);
                 }
