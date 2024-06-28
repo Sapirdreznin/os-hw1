@@ -9,8 +9,12 @@
 #include <regex>
 #include <fcntl.h>
 #include "Commands.h"
+#include <cmath>
 
 using namespace std;
+
+#define DIGIT_ASCII_DIFF 48
+#define DIGIT_MULTIPLE 10
 
 const std::string WHITESPACE = " \n\r\t\f\v";
 const int READ = 0;
@@ -78,6 +82,24 @@ void _removeBackgroundSign(char *cmd_line) {
     cmd_line[idx] = ' ';
     // truncate the command line string up to the last non-space character
     cmd_line[str.find_last_not_of(WHITESPACE, idx) + 1] = 0;
+}
+
+// returns the native number from a given string. If the format is invalid, returns -1
+int _getNative(const char* str) {
+    int num = 0;
+    int len = std::string(str).length();
+    for (int i = len - 1; i >= 0; --i) {
+        if (str[i] < '0' || str[i] > '9') {
+            return -1;
+        } else {
+            num += pow(DIGIT_MULTIPLE, len - i -1) * (int)(str[i] - DIGIT_ASCII_DIFF);
+        }
+    }
+    return num;
+}
+
+bool is_digits_only(const std::string& s) {
+    return std::all_of(s.begin(), s.end(), ::isdigit);
 }
 
 // TODO: Add your implementation for classes in Commands.h 
@@ -209,6 +231,38 @@ void SmallShell::changePrevious()
     }
 }
 
+void SmallShell::bringJobForeground(int jobId) {
+
+    this->updateFinishedJobs();
+
+    if (this->jobsMap.empty()) {
+        cerr << "smash error: fg: jobs list is empty" << endl;
+        return;
+    } else if (jobId == 0)
+    {   
+        // take maximum job Id.
+        jobId = this->jobsMap.rbegin()->first;
+    }
+
+    Job* job = this->jobsMap[jobId];
+    if (job == nullptr)
+    {
+        cerr << "smash error: fg: job-id " << jobId << " does not exist" << endl;
+        return;
+    }
+    std::string cmd = job->get_command();
+    cout << cmd << "& " << job->get_pid() << endl;
+
+    if (kill(job->get_pid(), SIGCONT) < 0) {
+        perror("smash error: kill failed");
+    }
+    else {
+        waitpid(job->get_pid(), nullptr, WUNTRACED);
+        this->updateFinishedJobs();
+    }
+    
+}
+
 void SmallShell::removeLastCharIfAmpersand(std::string& str) {
     if (!str.empty() && str.back() == '&') {
         str.pop_back();
@@ -238,7 +292,8 @@ bool is_pid_running(pid_t pid) {
     return false;
 }
 
-void SmallShell::updateFinishedJobs(){
+void SmallShell::updateFinishedJobs()
+{
     // for (const int& value : this->readChannels) {
     //     int jobId = 0;
     //     read(value, &jobId, sizeof(jobId));
@@ -272,6 +327,28 @@ void SmallShell::_jobs() {
 
 void SmallShell::_fg(std::vector<std::string> &args)
 {
+    int jobId = 0;
+
+    if (args.size() > 1)
+    {
+        cerr << "smash error: fg: invalid arguments" << endl;
+        return;
+    }
+
+    if ((args.size() == 1) && (!is_digits_only(args[0])))
+    {
+        cerr << "smash error: fg: invalid arguments" << endl;
+        return;
+    }
+    if (args.size() == 1) 
+    {
+        jobId = _getNative(args[0].c_str());
+        if (jobId == -1) {
+            cerr << "smash error: fg: invalid arguments" << endl;
+            return;
+        }
+    }
+    this->bringJobForeground(jobId);
 }
 
 void SmallShell::_quit(std::vector<std::string>& args) {
@@ -501,6 +578,9 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         else if (command == "cd") {
             this->_cd(args);
+        }
+        else if (command == "fg") {
+            this->_fg(args);
         }
         else if (command == "quit") {
             this->_quit(args);
