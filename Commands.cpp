@@ -804,7 +804,8 @@ void SmallShell::_listdir(std::vector<std::string>& args)
 void SmallShell::executeCommand(const char *cmd_line) {
     this->need_to_fork = true;
     this->updateFinishedJobs();
-    std::string cmd_line_str = cmd_line;
+    std::string copy_cmd_line = cmd_line;
+    std::string cmd_line_str = _rtrim(_ltrim(cmd_line));
     this->removeLastCharIfAmpersand(cmd_line_str);
     std::vector<std::string> parsed_cmd = this->splitStringBySpace(cmd_line_str); // should parse the & from the last arg
     if (!parsed_cmd.empty()) {
@@ -844,6 +845,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         else if (command == "fg") {
             this->_fg(args);
+
         }
         else if (command == "quit") {
             this->need_to_fork = false;
@@ -887,7 +889,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
             (this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0);
         const int jobId = this->getMaxJobId() + 1;
 
-        if (!need_to_fork) {
+        if (!need_to_fork || *cmd_line == '\0') {
             if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
                 dup2(stdOut, 1);
                 close_wrapper(file_fd);
@@ -900,7 +902,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         if (pid != 0) { // if father
             if (BACKGROUND_FLAG){
-                Job* job = new Job(pid, jobId, cmd_line_str);
+                Job* job = new Job(pid, jobId, copy_cmd_line);
                 this->jobsMap[jobId] = job;
             }
             else {
