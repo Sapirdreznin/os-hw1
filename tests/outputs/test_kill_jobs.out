@@ -2,17 +2,17 @@ smash> submitted by Eran
 smash> smash> smash> smash> [1] ./printSignals.exe &
 [2] sleep 200&
 [3] sleep 300&
-smash> signal number 9 was sent to pid 12696
+smash> signal number 9 was sent to pid 21135
 smash> smash> [1] ./printSignals.exe &
 [3] sleep 300&
 [4] sleep 400&
-smash> smash> smash> smash> smash> smash> signal number 9 was sent to pid 12861
-smash> signal number 5 was sent to pid 12695
+smash> smash> smash> smash> smash> smash> signal number 9 was sent to pid 21236
+smash> signal number 5 was sent to pid 21134
 smash> received signal number: 5
 smash> [1] ./printSignals.exe &
 [3] sleep 300&
 [4] sleep 500&
 smash> smash: sending SIGKILL signal to 3 jobs:
-12695: ./printSignals.exe &
-12697: sleep 300&
-13012: sleep 500&
+21134: ./printSignals.exe &
+21143: sleep 300&
+21445: sleep 500&

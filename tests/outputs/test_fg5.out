@@ -1,7 +1,7 @@
 smash> submitted by Eran
-smash> smash> smash> smash> sleep 200& 12572
+smash> smash> smash> smash> sleep 200& 21035
 smash: got ctrl-C
-smash: process 12572 was killed
+smash: process 21035 was killed
 smash> [1] sleep 100&
 [3] sleep 300&
 smash> 
