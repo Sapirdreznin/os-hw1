@@ -9,7 +9,7 @@
 #define COMMAND_MAX_LENGTH (200)
 #define COMMAND_MAX_ARGS (20)
 #define MAX_PWD_PATH 1001
-#define CONFIG "config.txt"
+#define CONFIG "config1.txt"
 
 int close_wrapper(int fd);
 int open_wrapper(const char* __file, int __oflag);
@@ -45,14 +45,16 @@ private:
     std::set<int> readChannels;
     // std::map<int, std::string> jobsMap;
     std::map<int, Job*> jobsMap;
+    std::vector<int> insertionOrderJobs;
     std::map<std::string, Command*> aliasMap;
+    std::vector<std::string> insertionOrderAlias;
     std::string shellPromptLine;
     pid_t smashPid;
     char* oldPwd;
     bool need_to_fork;
 
 
-
+    void clean_args(std::vector<std::string>& args);
     std::vector<std::string> splitString(const std::string& str);
     void removeLastCharIfAmpersand(std::string& str);
     void _chprompt(std::vector<std::string>& args);
@@ -63,7 +65,7 @@ private:
     void _fg(std::vector<std::string>& args);
     void _quit(std::vector<std::string>& arfgs);
     void _kill(std::vector<std::string>& args);
-    void _alias(std::vector<std::string>& args, std::string& real_command);
+    void _alias(std::vector<std::string>& args, std::string& real_command, std::string& prefix);
     void _unalias(std::vector<std::string>& args);
     void _getuser(std::vector<std::string>& args);
     void _listdir(std::vector<std::string>& args);

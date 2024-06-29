@@ -460,6 +460,7 @@ void SmallShell::updateFinishedJobs()
     for (auto it = this->jobsMap.begin(); it != this->jobsMap.end();) {
         if (!is_pid_running(it->second->get_pid())) {
             // Process does not exist anymore
+            this->insertionOrderJobs.erase(std::remove(this->insertionOrderJobs.begin(), insertionOrderJobs.end(), it->first), insertionOrderJobs.end());
             delete it->second;
             it = this->jobsMap.erase(it);
         }
@@ -473,8 +474,11 @@ void SmallShell::updateFinishedJobs()
 
 void SmallShell::_jobs() {
     this->updateFinishedJobs();
-    for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
-        std::cout <<"[" << it->first << "] " << it->second->get_command() << std::endl;
+    for (auto & key : this->insertionOrderJobs) {
+    std::cout <<"[" << key << "] " << this->jobsMap[key]->get_command() << std::endl;
+
+    // for (auto it = this->jobsMap.begin(); it != this->jobsMap.end(); ++it) {
+        // std::cout <<"[" << it->first << "] " << it->second->get_command() << std::endl;
     }
 }
 
@@ -548,6 +552,9 @@ void SmallShell::_kill(std::vector<std::string>& args){
         // error
         std::cerr << "smash error: kill: job-id " << args[1] << " does not exist" << std::endl;
     }
+    else if (args.size() > 2) {
+        std::cerr << "smash error: kill: invalid arguments" << std::endl;
+    }
     else {
         int pid = this->jobsMap[jobId]->get_pid();
         kill(pid, sigNum);
@@ -556,10 +563,12 @@ void SmallShell::_kill(std::vector<std::string>& args){
 
 }
 
-void SmallShell::_alias(std::vector<std::string> &args, std::string& real_command) {
+void SmallShell::_alias(std::vector<std::string> &args, std::string& real_command, std::string& prefix) {
     if (args.empty()) {
-        for (auto & it : this->aliasMap) {
-            std::cout << it.second->_real_command << std::endl;
+        for (auto & key : this->insertionOrderAlias) {
+        std::cout << this->aliasMap[key]->_real_command << std::endl;
+        // for (auto & it : this->aliasMap) {
+            // std::cout << it.second->_real_command << std::endl;
         }
     }
     // else if (args.size() != 1) {
@@ -589,7 +598,16 @@ void SmallShell::_alias(std::vector<std::string> &args, std::string& real_comman
                         command += " " + args[i];
                     }
                     command = command.substr(1, command.length() - 2);
-                    Command* command_obj = new Command(real_command, command);
+
+                    size_t alias_pos = real_command.find(prefix);
+                    std::string without_alias_command = real_command.substr(alias_pos + prefix.length());
+                    without_alias_command = _ltrim(without_alias_command);
+                    if (this->internalCommands.count(command) > 0 || this->specialCommands.count(command) > 0) {
+                        this->removeLastCharIfAmpersand(without_alias_command);
+                    }
+                    Command* command_obj = new Command(without_alias_command, command);
+
+                    this->insertionOrderAlias.push_back(alias);
                     this->aliasMap[alias] = command_obj;
                 }
                 else {
@@ -612,6 +630,7 @@ void SmallShell::_unalias(std::vector<std::string> &args) {
     }
     for (const std::string & arg : args) {
         if (this->aliasMap.count(arg) > 0) {
+            this->insertionOrderAlias.erase(std::remove(this->insertionOrderAlias.begin(), this->insertionOrderAlias.end(), arg), this->insertionOrderAlias.end());
             this->aliasMap.erase(arg);
             // todo: call delete functiom to avoid memory leaks
         }
@@ -656,6 +675,7 @@ void SmallShell::runSimpleExternal(std::string &command) {
         argsChar.push_back(charPtr);
 
     }
+    argsChar.push_back(nullptr);
     // for (auto & arg : argsChar) {
     //     std::cout << arg << std::endl;
     // }
@@ -765,10 +785,24 @@ void SmallShell::_getuser(std::vector<std::string>& args) {
     std::cout << "Group: " << group_name << std::endl;
 }
 
-void SmallShell::_listdir(std::vector<std::string>& args) 
+void SmallShell::clean_args(std::vector<std::string>& args) {
+    if (!args.empty()) {
+        if (args.back() == "&") {
+            args.pop_back();
+        }
+        else if (args.back().back() == '&'){
+            std::string last_arg = args.back();
+            this->removeLastCharIfAmpersand(last_arg);
+            args.pop_back();
+            args.push_back(last_arg);
+        }
+    }
+}
+
+void SmallShell::_listdir(std::vector<std::string>& args)
 {
     std::string mainPath;
-    if (args.size() > 1) 
+    if (args.size() > 1)
     {
         std::cerr << "smash error: listdir: too many arguments" << std::endl;
         return;
@@ -798,19 +832,20 @@ void SmallShell::_listdir(std::vector<std::string>& args)
     }
 }
 
-
 void SmallShell::executeCommand(const char *cmd_line) {
     this->need_to_fork = true;
     this->updateFinishedJobs();
     std::string copy_cmd_line = cmd_line;
-    std::string cmd_line_str = _rtrim(_ltrim(cmd_line));
-    this->removeLastCharIfAmpersand(cmd_line_str);
+    std::string cmd_line_str = std::string(cmd_line);
+    cmd_line_str = _rtrim(_ltrim(cmd_line_str));
+    // this->removeLastCharIfAmpersand(cmd_line_str);
     std::vector<std::string> parsed_cmd = this->splitStringBySpace(cmd_line_str); // should parse the & from the last arg
     if (!parsed_cmd.empty()) {
         std::string command = parsed_cmd.front();
         std::vector<std::string> args(parsed_cmd.begin() + 1, parsed_cmd.end());
-        bool REDIRECTION_FLAG = std::find(args.begin(), args.end(), "<") != args.end();
-        bool DOUBLE_REDIRECTION_FLAG = std::find(args.begin(), args.end(), "<<") != args.end();
+
+        bool REDIRECTION_FLAG = std::find(args.begin(), args.end(), ">") != args.end();
+        bool DOUBLE_REDIRECTION_FLAG = std::find(args.begin(), args.end(), ">>") != args.end();
         int stdOut = 0;
         int file_fd = 0;
         if (DOUBLE_REDIRECTION_FLAG || REDIRECTION_FLAG) {
@@ -820,7 +855,25 @@ void SmallShell::executeCommand(const char *cmd_line) {
 
         }
 
+        if (this->aliasMap.find(command) != this->aliasMap.end()) {
+            // this->need_to_fork = false;
 
+            std::string aliasCommand = this->aliasMap[command]->_parsed_command;
+            std::vector<std::string> _alias_args = this->splitStringBySpace(aliasCommand);
+            command = _alias_args[0];
+            std::vector<std::string> alias_args(_alias_args.begin() + 1, _alias_args.end());
+            args.insert(args.end(), alias_args.begin(), alias_args.end());
+
+            // size_t command_pos = cmd_line_str.find(command);
+            // aliasCommand = aliasCommand.substr(0, command_pos + aliasCommand.length());
+            // aliasCommand = _ltrim(aliasCommand);
+            // command = aliasCommand;
+            // parsed_cmd = this->splitStringBySpace(cmd_line_str); // should parse the & from the last arg
+
+        }
+        this->clean_args(args);
+        bool BACKGROUND_FLAG = (_isBackgroundComamnd(cmd_line)) &&
+                   (this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0);
         if (command == "pwd") {
             this->need_to_fork = false;
             this->_pwd();
@@ -855,7 +908,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         else if (command == "alias") {
             this->need_to_fork = false;
-            this->_alias(args, cmd_line_str);
+            this->_alias(args, cmd_line_str, parsed_cmd[0]);
         }
         else if (command == "unalias") {
             this->need_to_fork = false;
@@ -870,21 +923,6 @@ void SmallShell::executeCommand(const char *cmd_line) {
             this->_listdir(args);
         }
 
-        else if (this->aliasMap.find(command) != this->aliasMap.end()) {
-            this->need_to_fork = false;
-            std::string aliasCommand = this->aliasMap[command]->_parsed_command;
-            for (const std::string & arg : args) {
-                aliasCommand += " " + arg;
-            }
-            char* commandChar = new char[aliasCommand.size() + 1];
-            strcpy(commandChar, aliasCommand.c_str());
-            this->executeCommand(commandChar);
-            delete[] commandChar;
-            return;
-
-        }
-        bool BACKGROUND_FLAG = (_isBackgroundComamnd(cmd_line)) &&
-            (this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0);
         const int jobId = this->getMaxJobId() + 1;
 
         if (!need_to_fork || *cmd_line == '\0') {
@@ -902,6 +940,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
             if (BACKGROUND_FLAG){
                 Job* job = new Job(pid, jobId, copy_cmd_line);
                 this->jobsMap[jobId] = job;
+                this->insertionOrderJobs.push_back(jobId);
             }
             else {
                 // int fd = open_wrapper(CONFIG,O_WRONLY | O_CREAT);
@@ -928,16 +967,21 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         else {
             setpgrp();
-            if ((this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0)) {
-                if (this->isComplexCommand(cmd_line_str)) {
-                    this->runComplexCommand(cmd_line_str);
-                }
-                else {
-                    this->runSimpleExternal(cmd_line_str);
 
-                }
+        if ((this->internalCommands.count(command) == 0) && (this->specialCommands.count(command) == 0)) {
+            for (auto & word : args) {
+                command += " " + word;
             }
-            exit(0);
+            this->removeLastCharIfAmpersand(command);
+            if (this->isComplexCommand(command)) {
+                this->runComplexCommand(command);
+            }
+            else {
+                this->runSimpleExternal(command);
+
+            }
+        }
+        exit(0);
         }
     }
 
