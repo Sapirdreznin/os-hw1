@@ -384,25 +384,25 @@ void SmallShell::changePrevious()
     }
 }
 
-void SmallShell::bringJobForeground(int jobId) {
+void SmallShell::bringJobForeground(int jobId, bool isArgs) {
 
     this->updateFinishedJobs();
 
-    if (this->jobsMap.empty()) {
+    if (this->jobsMap.empty() && !isArgs) {
         cerr << "smash error: fg: jobs list is empty" << endl;
         return;
-    } else if (jobId == 0)
+    } else if (!isArgs)
     {   
         // take maximum job Id.
         jobId = this->jobsMap.rbegin()->first;
     }
 
-    Job* job = this->jobsMap[jobId];
-    if (job == nullptr)
-    {
+    if (this->jobsMap.count(jobId) == 0) {
         cerr << "smash error: fg: job-id " << jobId << " does not exist" << endl;
         return;
     }
+
+    Job* job = this->jobsMap[jobId];
     std::string cmd = job->get_command();
     cout << cmd << "& " << job->get_pid() << endl;
 
@@ -501,7 +501,8 @@ void SmallShell::_fg(std::vector<std::string> &args)
             return;
         }
     }
-    this->bringJobForeground(jobId);
+    bool isArgs = args.size() > 0;
+    this->bringJobForeground(jobId, isArgs);
 }
 
 void SmallShell::_quit(std::vector<std::string>& args) {
@@ -623,14 +624,11 @@ void SmallShell::_unalias(std::vector<std::string> &args) {
 
 void SmallShell::_chprompt(std::vector<std::string>& args)
 {
-    if (args.size() > 1 || args.size() < 0) {
-        // error
-    }
     SmallShell& smash = SmallShell::getInstance();
     if (args.size() == 0 ) {
         smash.setPromptLine(std::string("smash"));
     }
-    else if (args.size() == 1) {
+    else {
         smash.setPromptLine(args[0]);
     }
 }

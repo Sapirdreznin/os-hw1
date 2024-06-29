@@ -72,7 +72,7 @@ private:
     bool isComplexCommand(std::string& command);
     void runSimpleExternal(std::string& command);
     void runComplexCommand(std::string& command);
-    void bringJobForeground(int jobId);
+    void bringJobForeground(int jobId, bool isArgs);
 
     int replace_stdout_with_file(int fd);
     std::pair<int, int> handle_redirection(std::vector<std::string>& args, bool redirection_flag, bool double_redirection_flag);
