@@ -394,7 +394,7 @@ void SmallShell::bringJobForeground(int jobId, bool isArgs) {
     } else if (!isArgs)
     {   
         // take maximum job Id.
-        jobId = this->jobsMap.rbegin()->first;
+        jobId = this->getMaxJobId();
     }
 
     if (this->jobsMap.count(jobId) == 0) {
@@ -404,13 +404,16 @@ void SmallShell::bringJobForeground(int jobId, bool isArgs) {
 
     Job* job = this->jobsMap[jobId];
     std::string cmd = job->get_command();
-    cout << cmd << "& " << job->get_pid() << endl;
-
-    if (kill(job->get_pid(), SIGCONT) < 0) {
+    cout << cmd << " " << job->get_pid() << endl;
+    int pid = job->get_pid();
+    if (kill(pid, SIGCONT) < 0) {
         perror("smash error: kill failed");
     }
     else {
-        waitpid(job->get_pid(), nullptr, WUNTRACED);
+        update_config(pid);
+        int status;
+        waitpid(pid, &status, 0);
+        reset_config();
         this->updateFinishedJobs();
     }
     
