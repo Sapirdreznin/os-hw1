@@ -867,7 +867,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
         }
         else if (command == "listdir") {
             this->need_to_fork = false;
-            // this->_listdir(args);
+            this->_listdir(args);
         }
 
         else if (this->aliasMap.find(command) != this->aliasMap.end()) {
