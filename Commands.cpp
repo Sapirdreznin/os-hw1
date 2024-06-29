@@ -458,6 +458,8 @@ void SmallShell::updateFinishedJobs()
     // }
 
     for (auto it = this->jobsMap.begin(); it != this->jobsMap.end();) {
+        int status;
+        waitpid(it->second->get_pid(),&status, WNOHANG);
         if (!is_pid_running(it->second->get_pid())) {
             // Process does not exist anymore
             this->insertionOrderJobs.erase(std::remove(this->insertionOrderJobs.begin(), insertionOrderJobs.end(), it->first), insertionOrderJobs.end());
@@ -711,7 +713,8 @@ std::pair<int, int> SmallShell::handle_redirection(std::vector<std::string> &arg
         append_flag = O_APPEND;
     }
     std::string& path = args[args.size() - 1];
-    int file_fd = open_wrapper(path.c_str(),O_WRONLY | O_CREAT | append_flag);
+    this->removeLastCharIfAmpersand(path);
+    int file_fd = open_wrapper(path.c_str(),O_RDWR | O_CREAT | append_flag);
     // int file_fd = open(path.c_str(), O_WRONLY | O_CREAT | append_flag);
     // if (file_fd == -1) {
         // perror("smash error: open failed");
@@ -848,7 +851,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
         bool DOUBLE_REDIRECTION_FLAG = std::find(args.begin(), args.end(), ">>") != args.end();
         int stdOut = 0;
         int file_fd = 0;
-        if (DOUBLE_REDIRECTION_FLAG || REDIRECTION_FLAG) {
+        if ((DOUBLE_REDIRECTION_FLAG || REDIRECTION_FLAG) && args.size() > 1) {
             auto res = this->handle_redirection(args, REDIRECTION_FLAG, DOUBLE_REDIRECTION_FLAG);
             file_fd = res.first;
             stdOut = res.second;
@@ -926,7 +929,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
         const int jobId = this->getMaxJobId() + 1;
 
         if (!need_to_fork || *cmd_line == '\0') {
-            if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
+            if ((REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) && parsed_cmd.size() > 2) {
                 dup2(stdOut, 1);
                 close_wrapper(file_fd);
             }
@@ -961,6 +964,7 @@ void SmallShell::executeCommand(const char *cmd_line) {
 
             }
             if (REDIRECTION_FLAG || DOUBLE_REDIRECTION_FLAG) {
+                // sleep(0.01);
                 dup2(stdOut, 1);
                 close_wrapper(file_fd);
             }
